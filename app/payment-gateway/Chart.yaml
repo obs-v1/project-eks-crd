@@ -1,0 +1,6 @@
+apiVersion: v2
+name: payment-gateway
+description: bankobs microservice payment-gateway (payments domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

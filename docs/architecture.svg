@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 1100" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aGray" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#475569"/></marker>
+    <marker id="aAmber" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#b45309"/></marker>
+    <marker id="aBlue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker>
+    <marker id="aGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#16a34a"/></marker>
+    <marker id="aSlateO" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <rect width="1640" height="1100" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="820" y="42" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">project-eks — BankObs + Full Observability on EKS</text>
+  <text x="820" y="68" text-anchor="middle" font-size="14" fill="#64748b">Two EKS clusters, two VPCs · telemetry flows privately over VPC peering · UIs &amp; app exposed publicly via Traefik + ACM</text>
+
+  <!-- Internet -->
+  <rect x="690" y="92" width="260" height="44" rx="22" fill="#0f172a"/>
+  <text x="820" y="119" text-anchor="middle" font-size="15" font-weight="600" fill="#ffffff">Internet / Users</text>
+
+  <!-- Internet -> Traefik (public) arrows -->
+  <path d="M740,136 C600,175 470,180 400,206" fill="none" stroke="#475569" stroke-width="2.2" marker-end="url(#aGray)"/>
+  <path d="M900,136 C1040,175 1170,180 1240,206" fill="none" stroke="#475569" stroke-width="2.2" marker-end="url(#aGray)"/>
+  <text x="520" y="168" text-anchor="middle" font-size="12" fill="#475569">HTTPS · TLS (ACM)</text>
+  <text x="1120" y="168" text-anchor="middle" font-size="12" fill="#475569">HTTPS · TLS (ACM)</text>
+
+  <!-- ===================== OBSERVABILITY VPC ===================== -->
+  <rect x="40" y="188" width="720" height="820" rx="16" fill="#f0fdfa" stroke="#0d9488" stroke-width="2.5"/>
+  <text x="64" y="220" font-size="17" font-weight="700" fill="#0f766e">OBSERVABILITY VPC · 10.10.0.0/16</text>
+
+  <!-- obs public Traefik NLB -->
+  <rect x="250" y="236" width="300" height="46" rx="10" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="400" y="264" text-anchor="middle" font-size="13" font-weight="600" fill="#0f766e">Traefik NLB — public (ACM TLS)</text>
+
+  <!-- obs EKS cluster -->
+  <rect x="66" y="300" width="668" height="610" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text x="86" y="328" font-size="14" font-weight="700" fill="#334155">EKS cluster: observability  (Spot nodes + Cluster Autoscaler)</text>
+
+  <!-- OTel Collector (hub, right/gap side) -->
+  <rect x="470" y="396" width="246" height="92" rx="10" fill="#0f172a"/>
+  <text x="593" y="428" text-anchor="middle" font-size="15" font-weight="700" fill="#ffffff">OTel Collector</text>
+  <text x="593" y="450" text-anchor="middle" font-size="12" fill="#cbd5e1">OTLP in · :4317 / :4318</text>
+  <text x="593" y="470" text-anchor="middle" font-size="12" fill="#cbd5e1">fans out ↓</text>
+
+  <!-- backends (left of collector) -->
+  <rect x="90" y="366" width="250" height="46" rx="8" fill="#fff" stroke="#e6522c" stroke-width="1.5"/>
+  <text x="104" y="394" font-size="13" font-weight="600" fill="#9a3412">Prometheus · metrics (exemplars)</text>
+  <rect x="90" y="424" width="250" height="46" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="104" y="452" font-size="13" font-weight="600" fill="#15803d">Loki · logs</text>
+  <rect x="90" y="482" width="250" height="46" rx="8" fill="#fff" stroke="#b45309" stroke-width="1.5"/>
+  <text x="104" y="510" font-size="13" font-weight="600" fill="#92400e">Jaeger · traces</text>
+  <rect x="90" y="540" width="250" height="46" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="104" y="568" font-size="13" font-weight="600" fill="#6d28d9">Pyroscope · profiles</text>
+
+  <!-- Grafana single pane -->
+  <rect x="90" y="612" width="626" height="74" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <text x="403" y="641" text-anchor="middle" font-size="15" font-weight="700" fill="#b45309">Grafana — single pane (metric → trace → log → code)</text>
+  <text x="403" y="664" text-anchor="middle" font-size="12.5" fill="#92400e">datasources pre-wired: exemplars → Jaeger · Jaeger → Loki · Jaeger → Pyroscope   ·   + Alertmanager · Pyrra</text>
+
+  <!-- collector -> backends -->
+  <path d="M470,420 L344,388" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#aBlue)"/>
+  <path d="M470,440 L344,447" fill="none" stroke="#16a34a" stroke-width="2" marker-end="url(#aGreen)"/>
+  <path d="M470,462 L344,505" fill="none" stroke="#b45309" stroke-width="2" marker-end="url(#aAmber)"/>
+  <!-- grafana queries backends -->
+  <path d="M215,586 L300,610" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#aSlateO)"/>
+
+  <!-- obs public UI DNS -->
+  <path d="M400,282 L400,360" fill="none" stroke="#475569" stroke-width="1.8" stroke-dasharray="3 4" marker-end="url(#aGray)"/>
+  <text x="403" y="880" text-anchor="middle" font-size="12.5" fill="#0f766e">UIs:  grafana · jaeger · prometheus · alertmanager · pyroscope  .&lt;DOMAIN&gt;</text>
+
+  <!-- ===================== BANKOBS VPC ===================== -->
+  <rect x="880" y="188" width="720" height="820" rx="16" fill="#eef2ff" stroke="#4f46e5" stroke-width="2.5"/>
+  <text x="904" y="220" font-size="17" font-weight="700" fill="#4338ca">BANKOBS VPC · 10.20.0.0/16</text>
+
+  <!-- bankobs public Traefik NLB -->
+  <rect x="1090" y="236" width="300" height="46" rx="10" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="1240" y="264" text-anchor="middle" font-size="13" font-weight="600" fill="#4338ca">Traefik NLB — public (ACM TLS)</text>
+
+  <!-- bankobs EKS cluster -->
+  <rect x="906" y="300" width="668" height="610" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="7 5"/>
+  <text x="926" y="328" font-size="14" font-weight="700" fill="#334155">EKS cluster: bankobs  (Spot nodes + Cluster Autoscaler)</text>
+
+  <!-- 60 microservices (left/gap side) -->
+  <rect x="926" y="372" width="262" height="118" rx="10" fill="#fff" stroke="#4f46e5" stroke-width="1.8"/>
+  <text x="1057" y="402" text-anchor="middle" font-size="15" font-weight="700" fill="#3730a3">60 microservices</text>
+  <text x="1057" y="424" text-anchor="middle" font-size="12" fill="#4338ca">OTel SDK → traces (OTLP)</text>
+  <text x="1057" y="444" text-anchor="middle" font-size="12" fill="#4338ca">expose /metrics · JSON logs → stdout</text>
+  <text x="1057" y="470" text-anchor="middle" font-size="11.5" fill="#64748b">passthrough images · student's own CI/ECR</text>
+
+  <!-- web-portal -->
+  <rect x="1250" y="372" width="300" height="56" rx="10" fill="#fff" stroke="#4f46e5" stroke-width="1.5"/>
+  <text x="1400" y="398" text-anchor="middle" font-size="14" font-weight="600" fill="#3730a3">web-portal (frontend)</text>
+  <text x="1400" y="417" text-anchor="middle" font-size="11.5" fill="#64748b">→ bankobs.&lt;DOMAIN&gt;</text>
+  <path d="M1240,282 L1360,370" fill="none" stroke="#475569" stroke-width="1.8" stroke-dasharray="3 4" marker-end="url(#aGray)"/>
+
+  <!-- StatefulSet DBs -->
+  <rect x="1250" y="470" width="300" height="118" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+  <text x="1400" y="498" text-anchor="middle" font-size="14" font-weight="700" fill="#334155">StatefulSet DBs (EBS gp3)</text>
+  <text x="1400" y="522" text-anchor="middle" font-size="11.5" fill="#475569">postgres · oracle · mongo · redis</text>
+  <text x="1400" y="541" text-anchor="middle" font-size="11.5" fill="#475569">cassandra · elasticsearch</text>
+  <text x="1400" y="560" text-anchor="middle" font-size="11.5" fill="#475569">kafka · rabbitmq</text>
+  <!-- services use DBs -->
+  <path d="M1188,445 L1250,500" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#aSlateO)"/>
+
+  <!-- bankobs-agent -->
+  <rect x="926" y="612" width="624" height="86" rx="10" fill="#faf5ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1238" y="640" text-anchor="middle" font-size="15" font-weight="700" fill="#6d28d9">bankobs-agent — OTel Collector (DaemonSet)</text>
+  <text x="1238" y="662" text-anchor="middle" font-size="12.5" fill="#6d28d9">scrapes /metrics (node-local) + tails pod logs → forwards as OTLP</text>
+  <text x="1238" y="681" text-anchor="middle" font-size="11.5" fill="#7c3aed">the cross-cluster bridge for metrics + logs</text>
+  <!-- agent collects from services (scrape + tail) -->
+  <path d="M1057,490 L1057,608" fill="none" stroke="#7c3aed" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#aSlateO)"/>
+  <text x="1075" y="556" font-size="11.5" fill="#7c3aed">scrape + tail</text>
+
+  <!-- bankobs UI DNS line -->
+  <text x="1238" y="880" text-anchor="middle" font-size="12.5" fill="#4338ca">App:  bankobs .&lt;DOMAIN&gt;</text>
+
+  <!-- ===================== VPC PEERING (private) ===================== -->
+  <rect x="762" y="300" width="116" height="610" rx="10" fill="#f1f5f9" stroke="#334155" stroke-width="1.4" stroke-dasharray="6 5"/>
+  <text x="820" y="620" text-anchor="middle" font-size="14" font-weight="700" fill="#334155" transform="rotate(-90 820 620)">VPC PEERING · private</text>
+
+  <!-- traces: microservices -> collector -->
+  <path d="M926,436 C880,436 862,438 718,440" fill="none" stroke="#b45309" stroke-width="2.6" marker-end="url(#aAmber)"/>
+  <text x="820" y="372" text-anchor="middle" font-size="12.5" font-weight="600" fill="#b45309">OTLP traces</text>
+  <text x="820" y="389" text-anchor="middle" font-size="11" fill="#92400e">otel-collector.obs.internal:4317</text>
+
+  <!-- metrics+logs: agent -> collector -->
+  <path d="M926,655 C870,655 820,560 760,520 C740,505 724,492 718,482" fill="none" stroke="#2563eb" stroke-width="2.6" marker-end="url(#aBlue)"/>
+  <text x="820" y="712" text-anchor="middle" font-size="12.5" font-weight="600" fill="#2563eb">OTLP metrics + logs</text>
+  <text x="820" y="729" text-anchor="middle" font-size="11" fill="#1e40af">(agent → collector, private)</text>
+
+  <!-- ===================== FOOTER NOTES ===================== -->
+  <rect x="40" y="936" width="1560" height="146" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="62" y="966" font-size="14" font-weight="700" fill="#0f172a">How the flow works</text>
+
+  <circle cx="70" cy="992" r="4" fill="#b45309"/>
+  <text x="84" y="997" font-size="12.5" fill="#334155"><tspan font-weight="700">Traces</tspan>: each bankobs service's OTel SDK pushes spans straight to the collector at otel-collector.obs.internal:4317 — private, over the peering.</text>
+  <circle cx="70" cy="1016" r="4" fill="#2563eb"/>
+  <text x="84" y="1021" font-size="12.5" fill="#334155"><tspan font-weight="700">Metrics + logs</tspan>: a node-local agent in the bankobs cluster scrapes /metrics and tails pod logs, then forwards them as OTLP to the same collector (scrape/tail can't cross a VPC).</text>
+  <circle cx="70" cy="1040" r="4" fill="#0d9488"/>
+  <text x="84" y="1045" font-size="12.5" fill="#334155"><tspan font-weight="700">Private DNS</tspan>: a Route53 private zone (obs.internal) is associated with both VPCs — the name resolves in each, and the peering is what actually routes it. Telemetry never touches the internet.</text>
+  <circle cx="70" cy="1064" r="4" fill="#4f46e5"/>
+  <text x="84" y="1069" font-size="12.5" fill="#334155"><tspan font-weight="700">Public DNS + TLS</tspan>: external-dns auto-creates the &lt;svc&gt;.&lt;DOMAIN&gt; records in your Route53 public zone; the ACM wildcard cert terminates TLS at each Traefik NLB.</text>
+</svg>

@@ -1,0 +1,135 @@
+# BankObs infrastructure / pod usage — from the OTel Collector (kubeletstats + k8s_cluster),
+# NOT from node-exporter/kube-state (those are disabled; see values/kube-prometheus-stack.yaml).
+# Metric names are OTel-native: k8s_pod_cpu_usage / k8s_pod_memory_working_set_bytes (kubeletstats),
+# container_* (kubeletstats per-container), k8s_container_restarts / k8s_pod_phase (k8s_cluster).
+# Every series carries k8s_cluster_name so the $cluster variable selects which EKS cluster.
+#
+# Apply with: kubectl --context obs-v1-observability apply -f bankobs-infra-otel.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bankobs-infra-otel
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "BankObs"
+data:
+  bankobs-infra-otel.json: |
+    {
+      "uid": "bankobs-infra-otel",
+      "title": "BankObs — Infrastructure / Pod Usage (OTel)",
+      "tags": ["bankobs", "metrics", "infra", "otel", "kubeletstats"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "15s",
+      "time": { "from": "now-30m", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "ds_prom", "label": "Prometheus", "type": "datasource", "query": "prometheus",
+            "current": { "text": "Prometheus", "value": "prometheus" } },
+          { "name": "cluster", "label": "Cluster", "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "definition": "label_values(k8s_pod_cpu_usage, k8s_cluster_name)",
+            "query": { "query": "label_values(k8s_pod_cpu_usage, k8s_cluster_name)", "refId": "cl" },
+            "refresh": 2, "sort": 1, "includeAll": false,
+            "current": { "text": "obs-v1-bankobs", "value": "obs-v1-bankobs" } },
+          { "name": "namespace", "label": "Namespace", "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "definition": "label_values(k8s_pod_cpu_usage{k8s_cluster_name=\"$cluster\"}, k8s_namespace_name)",
+            "query": { "query": "label_values(k8s_pod_cpu_usage{k8s_cluster_name=\"$cluster\"}, k8s_namespace_name)", "refId": "ns" },
+            "refresh": 2, "sort": 1, "includeAll": true, "allValue": ".*",
+            "current": { "text": "bankobs", "value": "bankobs" } }
+        ]
+      },
+      "panels": [
+        { "type": "row", "title": "Overview — $cluster / $namespace", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+        { "type": "stat", "title": "Nodes",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "count(count by (k8s_node_name) (k8s_node_cpu_usage{k8s_cluster_name=\"$cluster\"})) or on() vector(0)" } ] },
+
+        { "type": "stat", "title": "Pods Running",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "count(k8s_pod_phase{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"} == 2) or on() vector(0)" } ] },
+
+        { "type": "stat", "title": "Pods NOT Running (Pending/Failed/Unknown)",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "count(k8s_pod_phase{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"} == 1 or k8s_pod_phase{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"} == 4 or k8s_pod_phase{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"} == 5) or on() vector(0)" } ] },
+
+        { "type": "stat", "title": "Container restarts (total)",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "sum(k8s_container_restarts{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"}) or on() vector(0)" } ] },
+
+        { "type": "row", "title": "CPU", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+
+        { "type": "timeseries", "title": "Top pods by CPU (cores)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(15, k8s_pod_cpu_usage{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"})",
+            "legendFormat": "{{k8s_pod_name}}" } ] },
+
+        { "type": "timeseries", "title": "Node CPU (cores)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "k8s_node_cpu_usage{k8s_cluster_name=\"$cluster\"}",
+            "legendFormat": "{{k8s_node_name}}" } ] },
+
+        { "type": "row", "title": "Memory", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 } },
+
+        { "type": "timeseries", "title": "Top pods by memory (working set)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(15, k8s_pod_memory_working_set_bytes{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"})",
+            "legendFormat": "{{k8s_pod_name}}" } ] },
+
+        { "type": "timeseries", "title": "Node memory used",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "k8s_node_memory_usage_bytes{k8s_cluster_name=\"$cluster\"}",
+            "legendFormat": "{{k8s_node_name}}" } ] },
+
+        { "type": "row", "title": "Restarts & per-container detail", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 } },
+
+        { "type": "table", "title": "Container restarts (ranked)",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "targets": [ { "refId": "A", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(25, k8s_container_restarts{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"})" } ],
+          "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "deployment_environment": true, "k8s_cluster_name": true, "k8s_pod_uid": true, "k8s_container_uid": true, "otel_scope_name": true, "otel_scope_version": true, "k8s_namespace_name": false },
+            "renameByName": { "k8s_namespace_name": "Namespace", "k8s_pod_name": "Pod", "k8s_container_name": "Container", "Value": "Restarts" } } } ],
+          "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [ { "matcher": { "id": "byName", "options": "Restarts" }, "properties": [ { "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] } } ] } ] } },
+
+        { "type": "timeseries", "title": "Top containers by memory working set",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(15, container_memory_working_set_bytes{k8s_cluster_name=\"$cluster\", k8s_namespace_name=~\"$namespace\"})",
+            "legendFormat": "{{k8s_pod_name}}/{{k8s_container_name}}" } ] }
+      ]
+    }

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ibm-mq-bridge
+description: bankobs microservice ibm-mq-bridge (legacy-stack domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

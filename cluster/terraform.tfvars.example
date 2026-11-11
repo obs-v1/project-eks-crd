@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill in YOUR values (or pass with -var / the Makefile).
+# The three REQUIRED inputs — everything else has a sensible default.
+
+public_hosted_zone_id = "Z0123456789ABCDEFGHIJ"       # your Route53 PUBLIC zone id
+public_domain_name    = "lab.example.com"             # UIs become grafana.lab.example.com, etc.
+acm_certificate_arn   = "arn:aws:acm:us-east-1:111122223333:certificate/abcd-...-wxyz"  # wildcard *.lab.example.com
+
+# ── Optional overrides ───────────────────────────────────────────────────────
+# aws_region         = "us-east-1"
+# eks_version        = "1.31"
+# private_dns_domain = "obs.internal"
+# obs_vpc_cidr       = "10.10.0.0/16"
+# bankobs_vpc_cidr   = "10.20.0.0/16"
+# public_api_access_cidrs = ["0.0.0.0/0"]   # tighten to your office IP if you prefer

@@ -1,0 +1,19 @@
+# Jaeger v2 (chart 4.x) — a single OTel-Collector-based binary, in-memory storage.
+# v2 is one Deployment + one Service named `jaeger`, exposing OTLP (:4317/:4318) and the
+# query UI (:16686) by default. (The old v1 allInOne/collector/query/agent split is gone.)
+#
+# VERSION PIN — chart 4.13.1 == Jaeger appVersion 2.20.0 (see Makefile `jaeger` target).
+# Jaeger 2.21.0 REMOVED the legacy v1 query HTTP API (/api/services, /api/traces,
+# /api/services/<svc>/operations); its UI moved to /api/v3. Grafana's Jaeger datasource
+# STILL calls the v1 /api/* paths (upstream grafana/grafana-jaeger-datasource#87, open), so on
+# 2.21+ the Grafana datasource 404s on the health check, service/operation pickers and search —
+# the Jaeger UI keeps working, only Grafana breaks. 2.20.0 is the last release that still serves
+# v1, and the Grafana plugin supports >=2.19, so we pin here until the datasource speaks v3.
+fullnameOverride: jaeger
+
+jaeger:
+  enabled: true
+  replicas: 1
+
+storage:
+  type: memory

@@ -1,0 +1,181 @@
+# kube-prometheus-stack — Prometheus + Alertmanager + Grafana (+ correlation pivots).
+# Grafana ships pre-wired with all four correlation pivots (the heart of the course).
+fullnameOverride: kps
+
+# ── Infra metric COLLECTION is OTel-only, on BOTH clusters ──────────────────────
+# node / pod / container usage and cluster-state come from the OTel Collector
+# (hostmetrics + kubeletstats on the node DaemonSets, k8s_cluster on the singleton
+# cluster collectors) and arrive here by remote-write. So Prometheus is a pure
+# remote-write TSDB for infra metrics. Disable kps's own scrapers that OTel now owns,
+# otherwise the same series would be collected twice (once canonical, once OTel-named).
+#   node_exporter   → hostmetrics receiver (system.* / k8s.node.*)
+#   kube-state      → k8s_cluster receiver (k8s.pod.phase, k8s.*.desired/ready, restarts…)
+#   kubelet/cAdvisor → kubeletstats receiver (container.* / k8s.pod.*)
+# NOTE: coreDNS + kube-apiserver ServiceMonitors are LEFT ON — OTel has no equivalent
+# for those control-plane /metrics, so dropping them would be a real gap. The stock kps
+# "Compute Resources" dashboards/alerts (which key off node_*/kube_* names) will have no
+# data by design; the course uses OTel-named panels instead.
+nodeExporter:
+  enabled: false
+kubeStateMetrics:
+  enabled: false
+kubelet:
+  enabled: false
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    # Receive the Collector's remote-write, and KEEP exemplars → the metric→trace pivot.
+    enableRemoteWriteReceiver: true
+    enableFeatures: ["exemplar-storage"]
+    retention: 7d
+    # Discover ServiceMonitors/Rules from any namespace, not just Helm-labeled ones.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 30Gi
+
+# ── Alertmanager ──────────────────────────────────────────────────────────────
+# DIVISION OF LABOUR (the CRD alerting model):
+#   • HERE  = HOW alerts are sent — the e-mail transport (Amazon SES: smarthost, auth, TLS)
+#             plus a catch-all receiver. This is the one place the SMTP gateway/creds live.
+#   • app-monitoring chart = WHAT to alert on + WHO is paged — each app ships a PrometheusRule
+#             (the alert exprs over the OTel metrics) and an AlertmanagerConfig (routes team→email).
+# The operator MERGES every selected AlertmanagerConfig into this base config at runtime, so
+# adding/altering an app's alerting is just a `helm upgrade` of its chart — no kps change.
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+    # Mount the SES SMTP password (created by `make alertmanager-secret SES_SMTP_PASSWORD=…`)
+    # at /etc/alertmanager/secrets/alertmanager-ses-smtp/smtp_password — referenced below as a
+    # *_file so the secret never appears in this values file or the Helm release. This secret
+    # MUST exist before the Alertmanager pod starts (the operator mounts it as a volume).
+    secrets:
+      - alertmanager-ses-smtp
+    # Discover the per-app AlertmanagerConfig CRs (label alertmanagerConfig=app-monitoring) in any
+    # namespace. matcherStrategy=None tells the operator to honour each route's OWN matchers
+    # (team/app/severity) instead of injecting a namespace matcher — our alerts are labelled by
+    # app/team, and the CRs live in `monitoring` while the alerts describe the bankobs namespace.
+    alertmanagerConfigSelector:
+      matchLabels:
+        alertmanagerConfig: app-monitoring
+    alertmanagerConfigNamespaceSelector: {}
+    alertmanagerConfigMatcherStrategy:
+      type: None
+  # Base config: global SES transport + a null catch-all. Per-app AlertmanagerConfigs graft their
+  # routes/receivers under this root. Override the SES username at deploy with
+  #   make kube-prometheus-stack SES_SMTP_USERNAME=AKIA… SES_FROM=alerts@you.com
+  # (the Makefile passes it via --set-string so it stays out of git).
+  config:
+    global:
+      resolve_timeout: 5m
+      # Amazon SES SMTP endpoint for your region. Port 587 = STARTTLS.
+      smtp_smarthost: "email-smtp.us-east-1.amazonaws.com:587"
+      smtp_hello: "lab.example.com"
+      # From address must be a VERIFIED SES identity (domain or e-mail), else SES rejects the send.
+      smtp_from: "observability-alerts@lab.example.com"
+      # SES SMTP username (an IAM-derived credential, NOT your AWS access key). Overridden at deploy.
+      smtp_auth_username: "REPLACE_WITH_SES_SMTP_USERNAME"
+      smtp_auth_password_file: "/etc/alertmanager/secrets/alertmanager-ses-smtp/smtp_password"
+      smtp_require_tls: true
+    route:
+      group_by: ["alertname", "team", "app"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      # Catch-all for anything no app route matched. MUST be named "null": the kps chart injects a
+      # Watchdog route (alertname="Watchdog" → receiver "null") that this config merges with, so a
+      # receiver named "null" has to exist or the operator rejects the config
+      # ("undefined receiver null used in route") and never builds the Alertmanager StatefulSet.
+      receiver: "null"
+    receivers:
+      - name: "null"
+    # A critical page silences the matching warning for the same alert/app (less noise).
+    inhibit_rules:
+      - source_matchers: ['severity = "critical"']
+        target_matchers: ['severity = "warning"']
+        equal: ["alertname", "app"]
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana:
+  adminPassword: admin
+  # Pin the NON-distroless Grafana image. The chart's default `<ver>-distroless` build uses the
+  # pure-Go modernc.org/sqlite driver, which silently skips the migration that adds the `uid`
+  # column to the `user` table — so on first boot Grafana runs all migrations, then crashes with
+  # "failed to create admin user: no such column: uid" and never comes up (503 at the ingress).
+  # The standard image (CGO mattn/go-sqlite3) applies that migration correctly. Same version,
+  # just the non-distroless build; keep the tag in step with the chart's Grafana appVersion.
+  image:
+    repository: grafana/grafana
+    tag: "13.3.0"
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 5Gi
+  # Turn OFF the chart's auto Prometheus datasource so we can define it ourselves
+  # WITH the exemplar wiring.
+  sidecar:
+    datasources:
+      defaultDatasourceEnabled: false
+  additionalDataSources:
+    - name: Prometheus
+      uid: prometheus
+      type: prometheus
+      access: proxy
+      url: http://kps-prometheus:9090
+      isDefault: true
+      jsonData:
+        exemplarTraceIdDestinations:
+          - name: trace_id
+            datasourceUid: jaeger
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki:3100
+      jsonData:
+        derivedFields:
+          - name: trace_id
+            matcherType: label
+            matcherRegex: trace_id
+            datasourceUid: jaeger
+            url: "${__value.raw}"
+    - name: Jaeger
+      uid: jaeger
+      type: jaeger
+      access: proxy
+      # Base endpoint only — NO trailing path. Jaeger v2 serves the UI at / and the query API at
+      # root (/api/v3/*); there is no /jaeger base path. (Grafana Jaeger ds docs require the base URL.)
+      url: http://jaeger:16686
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-5m"
+          spanEndTimeShift: "5m"
+          filterByTraceID: true
+          tags:
+            - { key: "service.name", value: "service_name" }
+        tracesToProfiles:
+          datasourceUid: pyroscope
+          profileTypeId: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
+          tags:
+            - { key: "service.name", value: "service_name" }
+    - name: Pyroscope
+      uid: pyroscope
+      type: grafana-pyroscope-datasource
+      access: proxy
+      url: http://pyroscope:4040

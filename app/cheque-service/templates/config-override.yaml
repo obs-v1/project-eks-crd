@@ -1,0 +1,11 @@
+{{- with .Values.configOverride }}
+# A corrected copy of a config file that is broken inside the published image. The
+# Deployment mounts this at /config and points the JVM at it (see values.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $.Chart.Name }}-config
+data:
+  {{ .file }}: |-
+{{ $.Files.Get (printf "config/%s" .file) | indent 4 }}
+{{- end }}

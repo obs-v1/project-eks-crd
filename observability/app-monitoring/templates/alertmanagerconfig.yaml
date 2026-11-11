@@ -1,0 +1,58 @@
+# WHO is paged. The operator MERGES this into the base Alertmanager config (kps values).
+# Selected via label alertmanagerConfig=app-monitoring. Transport (SES smarthost/auth/TLS/from)
+# is inherited from the global config — only the recipients live here.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ .Values.app.name }}-routing
+  namespace: {{ .Values.app.namespace }}
+  labels:
+    alertmanagerConfig: app-monitoring
+    app: {{ .Values.app.name }}
+spec:
+  route:
+    # Everything for this app enters here; the fallback receiver is the default team's.
+    receiver: {{ include "app-monitoring.receiver" (dict "app" .Values.app.name "team" .Values.defaultTeam) }}
+    groupBy: ["alertname", "team", "app"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    matchers:
+      - name: app
+        value: {{ .Values.app.name | quote }}
+        matchType: "="
+    routes:
+{{- range .Values.teams }}
+      - receiver: {{ include "app-monitoring.receiver" (dict "app" $.Values.app.name "team" .name) }}
+        matchers:
+          - name: team
+            value: {{ .name | quote }}
+            matchType: "="
+        continue: false
+    {{- if .criticalEmails }}
+        routes:
+          - receiver: {{ include "app-monitoring.receiver" (dict "app" $.Values.app.name "team" (printf "%s-critical" .name)) }}
+            matchers:
+              - name: severity
+                value: "critical"
+                matchType: "="
+            continue: false
+    {{- end }}
+{{- end }}
+  receivers:
+{{- range .Values.teams }}
+    - name: {{ include "app-monitoring.receiver" (dict "app" $.Values.app.name "team" .name) }}
+      emailConfigs:
+  {{- range .emails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+  {{- end }}
+  {{- if .criticalEmails }}
+    - name: {{ include "app-monitoring.receiver" (dict "app" $.Values.app.name "team" (printf "%s-critical" .name)) }}
+      emailConfigs:
+    {{- range .criticalEmails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+    {{- end }}
+  {{- end }}
+{{- end }}

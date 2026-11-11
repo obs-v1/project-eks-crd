@@ -1,0 +1,6 @@
+apiVersion: v2
+name: eligibility-engine
+description: bankobs microservice eligibility-engine (retail-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ledger-service
+description: bankobs microservice ledger-service (core-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

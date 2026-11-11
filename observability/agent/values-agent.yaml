@@ -1,0 +1,91 @@
+# bankobs-cluster collector AGENT (runs in the bankobs cluster, context obs-v1-bankobs).
+#
+# BankObs apps OTLP-export TRACES only; metrics come from /metrics (scrape) and logs from
+# stdout (tail) — both SAME-cluster mechanisms. The central obs collector is in another VPC and
+# cannot do either. So this node agent scrapes + tails LOCALLY and forwards everything by OTLP,
+# over the VPC peering, to otel-collector.obs.internal — which fans it to Prometheus / Loki.
+#
+#   bankobs pods ─/metrics (scrape)─┐
+#   node pod logs ─(tail/filelog)───┤─▶ [ this agent ] ─OTLP(private)─▶ obs collector ─▶ Prom/Loki
+#
+# DaemonSet because filelog reads node-local pod logs. Image tag omitted so it matches the
+# chart appVersion (a newer binary rejects the telemetry config the chart injects).
+mode: daemonset
+fullnameOverride: bankobs-agent
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+command:
+  name: otelcol-contrib
+
+# Each DaemonSet pod learns its own node name, so its Prometheus receiver scrapes ONLY the pods
+# on that node (otherwise all N agents scrape every pod → duplicate samples → remote-write rejects).
+extraEnvs:
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+presets:
+  kubernetesAttributes: { enabled: true }               # k8sattributes processor + RBAC (pods get/list/watch)
+  logsCollection:        { enabled: true, includeCollectorLogs: false }  # filelog receiver + /var/log/pods mounts
+  # OTel IS the metrics collector here — no node-exporter, no cAdvisor scrape job:
+  hostMetrics:           { enabled: true }   # hostmetrics receiver (node cpu/mem/disk/net/load) + hostfs mounts
+  kubeletMetrics:        { enabled: true }   # kubeletstats receiver (node/pod/container cpu·mem·fs·net) + RBAC (nodes/stats)
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 1Gi }
+
+config:
+  receivers:
+    # Scrape every bankobs pod that carries the prometheus.io/scrape annotation (the charts add it).
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: bankobs-pods
+            scrape_interval: 15s
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - { source_labels: [__meta_kubernetes_namespace], action: keep, regex: bankobs }
+              # Scrape only this node's pods (the collector expands ${env:NODE_NAME} at startup).
+              - source_labels: [__meta_kubernetes_pod_node_name]
+                action: keep
+                regex: "${env:NODE_NAME}"
+              - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], action: keep, regex: "true" }
+              - { source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], action: replace, target_label: __metrics_path__, regex: (.+) }
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                target_label: __address__
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+              - { source_labels: [__meta_kubernetes_pod_label_app], target_label: app }
+              - { source_labels: [__meta_kubernetes_pod_label_domain], target_label: domain }
+              - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
+              - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
+
+  processors:
+    memory_limiter: { check_interval: 5s, limit_percentage: 80, spike_limit_percentage: 25 }
+    batch:          { timeout: 5s, send_batch_size: 1024 }
+    resource:
+      attributes:
+        - { key: deployment.environment, value: training, action: upsert }
+        - { key: k8s.cluster.name, value: obs-v1-bankobs, action: upsert }  # so every series is filterable by cluster
+
+  exporters:
+    # Everything forwards by OTLP to the central collector across the peering.
+    otlp:
+      endpoint: otel-collector.obs.internal:4317
+      tls: { insecure: true }
+    debug: { verbosity: basic }
+
+  service:
+    pipelines:
+      # The logsCollection preset supplies the filelog receiver; kubernetesAttributes prepends
+      # k8sattributes to each pipeline. We route both to the OTLP forwarder.
+      # prometheus = any app /metrics (bankobs apps expose none → spanmetrics covers RED);
+      # hostmetrics = node, kubeletstats = pod/container usage. hostmetrics/kubeletstats
+      # receivers are supplied by the presets above.
+      metrics: { receivers: [prometheus, hostmetrics, kubeletstats], processors: [memory_limiter, resource, batch], exporters: [otlp] }
+      logs:    { receivers: [filelog],    processors: [memory_limiter, resource, batch], exporters: [otlp] }

@@ -1,0 +1,96 @@
+# OTel Collector (gateway) — the hub for three signals on the observability cluster.
+# BankObs (other VPC) pushes OTLP here over the peering, via otel-collector.obs.internal.
+mode: deployment
+fullnameOverride: otel-collector
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  # No tag override: use the chart's appVersion so the config schema matches the binary
+  # (a mismatched newer binary rejects service.telemetry.metrics.address the chart injects).
+command:
+  name: otelcol-contrib
+
+replicaCount: 1
+
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+
+resources:
+  requests: { cpu: 200m, memory: 384Mi }
+  limits:   { cpu: "1",  memory: 768Mi }
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc: { endpoint: 0.0.0.0:4317 }
+        http: { endpoint: 0.0.0.0:4318 }
+  processors:
+    batch: {}
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+  connectors:
+    # Derive per-service RED metrics (rate/errors/duration) from the traces BankObs
+    # already pushes — gives Grafana metric dashboards + exemplars for every service
+    # even though the apps expose no /metrics of their own.
+    spanmetrics:
+      histogram:
+        explicit:
+          buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s, 30s]
+      dimensions:
+        - name: http.method
+        - name: http.status_code
+        - name: http.route
+        - name: service.namespace
+      exemplars:
+        enabled: true
+      exclude_dimensions: []
+      metrics_flush_interval: 15s
+      metrics_expiration: 5m
+      namespace: ""
+  exporters:
+    otlp/jaeger:
+      endpoint: jaeger:4317
+      tls: { insecure: true }
+    prometheusremotewrite:
+      endpoint: http://kps-prometheus:9090/api/v1/write
+      tls: { insecure: true }
+      send_metadata: true
+      # Promote OTel resource attributes (k8s.namespace.name, k8s.pod.name, k8s.node.name,
+      # k8s.cluster.name, host.name, container.name …) onto EVERY series as Prometheus labels.
+      # Without this the infra metrics from hostmetrics/kubeletstats/k8s_cluster land with their
+      # identity stranded in a separate `target_info` series and you can't filter them by
+      # pod/namespace/node — i.e. the "pod usage" would be unqueryable. (Applies to all metrics
+      # this gateway writes; the app OTLP + spanmetrics series already carry their dims as labels.)
+      resource_to_telemetry_conversion:
+        enabled: true
+    otlphttp/loki:
+      endpoint: http://loki:3100/otlp
+      tls: { insecure: true }
+  service:
+    pipelines:
+      # traces fan out to Jaeger AND into the spanmetrics connector
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/jaeger, spanmetrics]
+      # metrics = whatever apps push (OTLP) PLUS the spanmetrics-derived RED series
+      metrics:
+        receivers: [otlp, spanmetrics]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlphttp/loki]

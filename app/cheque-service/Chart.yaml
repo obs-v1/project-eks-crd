@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cheque-service
+description: bankobs microservice cheque-service (core-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

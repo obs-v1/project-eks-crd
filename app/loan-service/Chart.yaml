@@ -1,0 +1,6 @@
+apiVersion: v2
+name: loan-service
+description: bankobs microservice loan-service (retail-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

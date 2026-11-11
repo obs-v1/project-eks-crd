@@ -1,0 +1,130 @@
+# BankObs per-service RED metrics, derived from TRACES by the collector's spanmetrics connector.
+#
+# This is the metric cockpit the grafana->metric->trace->log drill starts from. It exists ONLY
+# because the OTel collector now runs a `spanmetrics` connector (observability/values/otel-collector.yaml):
+# BankObs apps still expose no /metrics of their own, but every span they push is turned into
+# calls_total + duration_milliseconds, remote-written to Prometheus WITH trace_id exemplars.
+#
+# Click-through (all wired at the datasource level, panels inherit it):
+#   metric exemplar --trace_id--> Jaeger trace --tracesToLogsV2--> Loki logs --trace_id--> back to Jaeger
+#
+# Apply with: kubectl --context obs-v1-observability apply -f bankobs-red-spanmetrics.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bankobs-red-spanmetrics
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "BankObs"
+data:
+  bankobs-red-spanmetrics.json: |
+    {
+      "uid": "bankobs-red-spanmetrics",
+      "title": "BankObs — RED (spanmetrics)",
+      "tags": ["bankobs", "metrics", "red", "spanmetrics"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "15s",
+      "time": { "from": "now-30m", "to": "now" },
+      "templating": {
+        "list": [
+          { "name": "ds_prom", "label": "Prometheus", "type": "datasource", "query": "prometheus",
+            "current": { "text": "Prometheus", "value": "prometheus" } },
+          { "name": "ds_loki", "label": "Loki", "type": "datasource", "query": "loki",
+            "current": { "text": "Loki", "value": "loki" } },
+          { "name": "ds_jaeger", "label": "Jaeger", "type": "datasource", "query": "jaeger",
+            "current": { "text": "Jaeger", "value": "jaeger" } },
+          { "name": "service", "label": "Service", "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "definition": "label_values(calls_total{span_kind=\"SPAN_KIND_SERVER\"}, service_name)",
+            "query": { "query": "label_values(calls_total{span_kind=\"SPAN_KIND_SERVER\"}, service_name)", "refId": "sm" },
+            "refresh": 2, "sort": 1, "includeAll": false,
+            "current": { "text": "payment-gateway", "value": "payment-gateway" } }
+        ]
+      },
+      "panels": [
+        { "type": "row", "title": "RED — $service", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+        { "type": "stat", "title": "Request rate (req/s)",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "sum(rate(calls_total{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))" } ] },
+
+        { "type": "stat", "title": "Error rate (%)",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "percent", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "100 * sum(rate(calls_total{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) / clamp_min(sum(rate(calls_total{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001)" } ] },
+
+        { "type": "stat", "title": "Latency p95 (ms)",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 500 }, { "color": "red", "value": 1000 } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(duration_milliseconds_bucket{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))" } ] },
+
+        { "type": "stat", "title": "Latency p99 (ms)",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 2500 } ] } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "histogram_quantile(0.99, sum by (le) (rate(duration_milliseconds_bucket{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))" } ] },
+
+        { "type": "timeseries", "title": "Request rate by status_code",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" }, "fillOpacity": 30 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "sum by (status_code) (rate(calls_total{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))",
+            "legendFormat": "{{status_code}}" } ] },
+
+        { "type": "timeseries", "title": "Latency p50 / p95 / p99 (ms) — exemplars → trace",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [
+            { "refId": "p50", "datasource": { "type": "prometheus", "uid": "${ds_prom}" }, "exemplar": true,
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(duration_milliseconds_bucket{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))", "legendFormat": "p50" },
+            { "refId": "p95", "datasource": { "type": "prometheus", "uid": "${ds_prom}" }, "exemplar": true,
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(duration_milliseconds_bucket{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))", "legendFormat": "p95" },
+            { "refId": "p99", "datasource": { "type": "prometheus", "uid": "${ds_prom}" }, "exemplar": true,
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(duration_milliseconds_bucket{service_name=\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))", "legendFormat": "p99" } ] },
+
+        { "type": "row", "title": "Fleet — blast radius", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 } },
+
+        { "type": "timeseries", "title": "Error rate by service (top offenders)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(10, sum by (service_name) (rate(calls_total{span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])))",
+            "legendFormat": "{{service_name}}" } ] },
+
+        { "type": "table", "title": "Services ranked by error rate (click → Jaeger)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "targets": [ { "refId": "A", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(15, sum by (service_name) (rate(calls_total{span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])))" } ],
+          "transformations": [ { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "service_name": "Service", "Value": "Errors/s" } } } ],
+          "fieldConfig": { "defaults": { "links": [
+            { "title": "Open traces in Jaeger", "url": "/explore?left=%7B%22datasource%22:%22jaeger%22,%22queries%22:%5B%7B%22queryType%22:%22search%22,%22service%22:%22${__data.fields.Service}%22%7D%5D%7D", "targetBlank": true } ] } } },
+
+        { "type": "row", "title": "Logs for $service (trace_id → Jaeger)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 } },
+
+        { "type": "logs", "title": "Error logs — $service",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 23 },
+          "datasource": { "type": "loki", "uid": "${ds_loki}" },
+          "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" },
+          "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
+            "expr": "{service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b`" } ] }
+      ]
+    }

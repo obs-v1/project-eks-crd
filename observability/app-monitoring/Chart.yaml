@@ -1,0 +1,14 @@
+apiVersion: v2
+name: app-monitoring
+description: >-
+  Per-application alerting as CRDs. Renders a Prometheus Operator PrometheusRule
+  (WHAT to alert on, as PromQL over the OTel-collected metrics already in Prometheus)
+  and an AlertmanagerConfig (WHO is paged — routes each team's alerts to its e-mail
+  receiver). Metrics collection is unchanged (OTel-only); this chart adds no scraping.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - prometheus-operator
+  - alerting
+  - crd

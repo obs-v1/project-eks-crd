@@ -1,0 +1,6 @@
+apiVersion: v2
+name: case-management
+description: bankobs microservice case-management (fraud-risk domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

@@ -1,0 +1,50 @@
+# obs-cluster node agent (runs IN the observability cluster, context obs-v1-observability).
+#
+# Mirror of the bankobs node agent, so the OBS cluster's OWN node/pod/container usage is also
+# collected by OTel (not by kps's node-exporter/kubelet scrape, which we disabled). Forwards to
+# the LOCAL gateway in the same cluster (no peering hop).
+#
+#   obs node ─hostmetrics (node)─┐
+#   obs pods ─kubeletstats ──────┤─▶ [ this agent ] ─OTLP(local)─▶ otel-collector.monitoring:4317
+#
+# DaemonSet so hostmetrics/kubeletstats are node-local. Image tag omitted → matches chart appVersion.
+mode: daemonset
+fullnameOverride: obs-agent
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+command:
+  name: otelcol-contrib
+
+extraEnvs:
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+presets:
+  kubernetesAttributes: { enabled: true }   # k8sattributes processor + RBAC (pods get/list/watch)
+  hostMetrics:          { enabled: true }    # hostmetrics receiver (node cpu/mem/disk/net/load) + hostfs mounts
+  kubeletMetrics:       { enabled: true }    # kubeletstats receiver (node/pod/container cpu·mem·fs·net) + RBAC
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 1Gi }
+
+config:
+  processors:
+    memory_limiter: { check_interval: 5s, limit_percentage: 80, spike_limit_percentage: 25 }
+    batch:          { timeout: 5s, send_batch_size: 1024 }
+    resource:
+      attributes:
+        - { key: deployment.environment, value: training, action: upsert }
+        - { key: k8s.cluster.name, value: obs-v1-observability, action: upsert }
+  exporters:
+    otlp:
+      endpoint: otel-collector.monitoring.svc.cluster.local:4317   # local gateway, same cluster
+      tls: { insecure: true }
+    debug: { verbosity: basic }
+  service:
+    pipelines:
+      # hostmetrics + kubeletstats receivers come from the presets above.
+      metrics: { receivers: [hostmetrics, kubeletstats], processors: [memory_limiter, resource, batch], exporters: [otlp] }

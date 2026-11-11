@@ -1,0 +1,6 @@
+apiVersion: v2
+name: whatsapp-service
+description: bankobs microservice whatsapp-service (notifications domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fx-service
+description: bankobs microservice fx-service (payments domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

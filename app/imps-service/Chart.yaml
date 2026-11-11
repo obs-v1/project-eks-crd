@@ -1,0 +1,6 @@
+apiVersion: v2
+name: imps-service
+description: bankobs microservice imps-service (payments domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

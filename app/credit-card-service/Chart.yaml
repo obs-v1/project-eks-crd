@@ -1,0 +1,6 @@
+apiVersion: v2
+name: credit-card-service
+description: bankobs microservice credit-card-service (retail-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

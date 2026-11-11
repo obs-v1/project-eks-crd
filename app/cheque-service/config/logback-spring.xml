@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ── INTENTIONALLY UNSTRUCTURED LOGGING ──
+  cheque-service emits classic Spring Boot console output, NOT JSON.
+  This is a Logstash / Fluent Bit parsing lab target — students should
+  write a grok pattern that extracts {timestamp, level, thread, logger,
+  message} from this format and converts it to JSON in the pipeline.
+
+  Example line (the field after the PID is Spring Boot's three-hyphen
+  separator, shown here as [SEP] because an XML comment may not contain
+  a literal double hyphen — that is exactly the bug this file fixes):
+    2026-06-15 14:23:01.234  INFO 1 [SEP] [           main] c.b.cheque.ChequeController : message
+-->
+<configuration>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5p ${PID:- } --- [%15.15t] %-40.40logger{39} : %m%n</pattern>
+    </encoder>
+  </appender>
+  <root level="${LOG_LEVEL:-INFO}">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>

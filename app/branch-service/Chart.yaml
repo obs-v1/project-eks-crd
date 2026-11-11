@@ -1,0 +1,6 @@
+apiVersion: v2
+name: branch-service
+description: bankobs microservice branch-service (core-banking domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

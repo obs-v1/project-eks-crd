@@ -1,0 +1,64 @@
+# web-portal — the BankObserve360 UI.
+# NodePort 30080 is published as port 80 on the EC2 host by
+# kind-config.yaml, so the portal is at http://<ec2-ip>/ just like compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-portal
+  namespace: bankobs
+  labels: { app: web-portal, domain: platform }
+spec:
+  type: NodePort
+  selector: { app: web-portal }
+  ports:
+    - { name: http, port: 8200, targetPort: 8200, nodePort: 30080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-portal
+  namespace: bankobs
+  labels: { app: web-portal, domain: platform }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: web-portal } }
+  template:
+    metadata:
+      labels: { app: web-portal, domain: platform }
+    spec:
+      containers:
+        - name: web-portal
+          image: public.ecr.aws/w8x4g9h7/obs-v1/web-portal:1.0.0
+          ports: [{ containerPort: 8200 }]
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: PORT, value: "8200" }
+            - { name: BANKOBS_IN_DOCKER, value: "1" }
+            - { name: COOKIE_SECURE, value: "false" }
+            - { name: OBSERVABILITY_MODE, value: dark }
+            - { name: OTEL_SDK_DISABLED, value: "true" }
+            - { name: MANAGEMENT_TRACING_ENABLED, value: "false" }
+            - { name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED, value: "false" }
+            - { name: LOGGING_LEVEL_IO_OPENTELEMETRY, value: "OFF" }
+          # The probe path `/` is a full Next.js SSR render — heavy under load. The
+          # default 1s timeout trips during a GC pause or at 40 VUs on a tight CPU
+          # cap, so the liveness probe KILLS the healthy pod (exit137/Error) →
+          # restart loop. Give the probes a real timeout + more tolerance.
+          readinessProbe:
+            httpGet: { path: /, port: 8200 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            httpGet: { path: /, port: 8200 }
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            # Next.js SSR at 40 VUs exceeds 256Mi (OOMKill) and starves on a 500m
+            # CPU cap (slow renders → probe timeouts → liveness kills). 1Gi + 2 CPU
+            # across 3 replicas gives the SSR runtime real headroom under load.
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "2", memory: 1Gi }

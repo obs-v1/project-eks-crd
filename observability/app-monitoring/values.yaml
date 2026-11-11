@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  app-monitoring — declare one application's alerting. Copy this to
+#  values-<app>.yaml and deploy with:
+#    helm upgrade --install <app>-monitoring ./app-monitoring -n monitoring -f values-<app>.yaml
+#
+#  Nothing here changes metric COLLECTION (that stays OTel-only). You are only
+#  declaring: (1) which PromQL conditions raise alerts, and (2) which team e-mail
+#  each alert is routed to. The SES transport lives centrally in the kps values.
+# ─────────────────────────────────────────────────────────────────────────────
+
+app:
+  # Logical application name. Used as the `app` label on every rule + the routing key,
+  # and to name the generated PrometheusRule / AlertmanagerConfig.
+  name: example
+  # Namespace the CRs are created in. Must be a namespace Alertmanager/Prometheus watch
+  # (here: monitoring, on the observability cluster). NOT the app's own namespace.
+  namespace: monitoring
+
+# Teams that receive alerts. Each alert names a `team`; its alerts route to that team's
+# `emails`. If a team sets `criticalEmails`, alerts with severity=critical go there instead.
+teams:
+  - name: platform
+    emails: ["platform@example.com"]
+  # - name: payments
+  #   emails: ["payments@example.com"]
+  #   criticalEmails: ["payments-pager@example.com"]
+
+# Team used for any alert that doesn't set `team:` (must be one of the names above).
+defaultTeam: platform
+
+# Set true to add an always-firing probe alert (severity=info) — handy to prove the
+# rule → Prometheus → Alertmanager → e-mail path end to end, then turn back off.
+enableTestAlert: false
+
+# The alert rules. `expr` is raw PromQL over metrics already in Prometheus.
+# Prometheus templating ({{ $value }}, {{ $labels.x }}) is written literally here — Helm
+# does NOT re-evaluate values, so it passes straight through into the rendered rule.
+alerts:
+  - name: ExamplePodNotRunning
+    team: platform
+    severity: critical
+    for: 5m
+    expr: "count(k8s_pod_phase == 1 or k8s_pod_phase == 4 or k8s_pod_phase == 5) > 0"
+    summary: "Pods not in Running state"
+    description: "{{ $value }} pod(s) are Pending/Failed/Unknown."

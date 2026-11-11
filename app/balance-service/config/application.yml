@@ -1,0 +1,28 @@
+spring:
+  config:
+    import: "optional:classpath:application-common.yml"
+  application:
+    name: balance-service
+  datasource:
+    url: ${ORACLE_URL:jdbc:oracle:thin:@oracle:1521/XEPDB1}
+    username: ${ORACLE_USER:BANKOBS_CORE}
+    password: ${ORACLE_PASSWORD:Training123!}
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari: { maximum-pool-size: 10, connection-timeout: 5000 }
+  data:
+    # FIXED: was `redis: { host: ${REDIS_HOST:redis}, port: ${REDIS_PORT:6379} }` — an
+    # unquoted ${..} inside a YAML flow mapping is a parse error. Block style avoids it.
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    consumer:
+      key-deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset:  earliest
+      group-id:           balance-service
+server:
+  port: ${SERVICE_PORT:8003}
+service:
+  version: ${SERVICE_VERSION:1.0.0}

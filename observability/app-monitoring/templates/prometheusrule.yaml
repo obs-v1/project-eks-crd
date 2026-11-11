@@ -1,0 +1,41 @@
+{{- include "app-monitoring.validate" . -}}
+# WHAT to alert on. Prometheus (ruleSelectorNilUsesHelmValues:false) discovers this from any
+# namespace. Each alert carries app/team/severity labels that the AlertmanagerConfig routes on.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Values.app.name }}-alerts
+  namespace: {{ .Values.app.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: app-monitoring
+    app: {{ .Values.app.name }}
+spec:
+  groups:
+    - name: {{ .Values.app.name }}.alerts
+      rules:
+{{- range .Values.alerts }}
+        - alert: {{ .name }}
+          expr: {{ .expr | quote }}
+          {{- if .for }}
+          for: {{ .for }}
+          {{- end }}
+          labels:
+            severity: {{ .severity | default "warning" | quote }}
+            team: {{ .team | default $.Values.defaultTeam | quote }}
+            app: {{ $.Values.app.name | quote }}
+          annotations:
+            summary: {{ .summary | default .name | quote }}
+            description: {{ .description | default "" | quote }}
+{{- end }}
+{{- if .Values.enableTestAlert }}
+        # Always-firing probe (severity=info) — proves the pipeline. Disable after testing.
+        - alert: {{ .Values.app.name }}AlertPipelineTest
+          expr: "vector(1)"
+          labels:
+            severity: "info"
+            team: {{ .Values.defaultTeam | quote }}
+            app: {{ .Values.app.name | quote }}
+          annotations:
+            summary: "Alert pipeline test for {{ .Values.app.name }}"
+            description: "If you received this e-mail, PrometheusRule → Alertmanager → SES works."
+{{- end }}

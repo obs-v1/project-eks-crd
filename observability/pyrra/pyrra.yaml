@@ -1,0 +1,95 @@
+# Pyrra — the SLO tool with a live budget UI (pinned v0.7.0).
+# Two processes from one binary:
+#   • pyrra kubernetes  — the OPERATOR: watches ServiceLevelObjective CRDs and generates a
+#                         PrometheusRule (recording rules + multi-window burn-rate alerts).
+#                         Also serves an internal API (:9444) listing the SLOs.
+#   • pyrra api         — the UI (:9099): reads the SLO list from the operator and the live
+#                         data from Prometheus, and draws the error budget + burn rate.
+# The CRD (servicelevelobjectives.pyrra.dev) is applied separately by the Makefile from the
+# pinned upstream release.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: pyrra-kubernetes, namespace: monitoring }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: pyrra-kubernetes }
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules/status"]
+    verbs: ["get"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["pyrra.dev"]
+    resources: ["servicelevelobjectives/finalizers"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: pyrra-kubernetes }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: pyrra-kubernetes }
+subjects:
+  - { kind: ServiceAccount, name: pyrra-kubernetes, namespace: monitoring }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: pyrra-kubernetes, namespace: monitoring, labels: { app: pyrra-kubernetes } }
+spec:
+  selector: { matchLabels: { app: pyrra-kubernetes } }
+  template:
+    metadata: { labels: { app: pyrra-kubernetes } }
+    spec:
+      serviceAccountName: pyrra-kubernetes
+      containers:
+        - name: pyrra
+          image: ghcr.io/pyrra-dev/pyrra:v0.10.2
+          args: ["kubernetes"]
+          ports:
+            - { name: internal, containerPort: 9444 }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pyrra-kubernetes, namespace: monitoring }
+spec:
+  selector: { app: pyrra-kubernetes }
+  ports:
+    - { name: internal, port: 9444, targetPort: 9444 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: pyrra-api, namespace: monitoring, labels: { app: pyrra-api } }
+spec:
+  selector: { matchLabels: { app: pyrra-api } }
+  template:
+    metadata: { labels: { app: pyrra-api } }
+    spec:
+      containers:
+        - name: pyrra
+          image: ghcr.io/pyrra-dev/pyrra:v0.10.2
+          args:
+            - "api"
+            - "--api-url=http://pyrra-kubernetes.monitoring.svc.cluster.local:9444"
+            - "--prometheus-url=http://kps-prometheus.monitoring.svc.cluster.local:9090"
+          ports:
+            - { name: http, containerPort: 9099 }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pyrra-api, namespace: monitoring }
+spec:
+  type: NodePort
+  selector: { app: pyrra-api }
+  ports:
+    - { name: http, port: 9099, targetPort: 9099, nodePort: 30099 }   # -> kind hostPort 9099

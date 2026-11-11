@@ -1,0 +1,50 @@
+# bankobs CLUSTER-state collector (runs in the bankobs cluster, context obs-v1-bankobs).
+#
+# The k8s_cluster receiver watches the API server and emits cluster-state metrics — pod phase,
+# Deployment/StatefulSet desired-vs-ready, container restart counts, node conditions, resource
+# quotas, allocatable capacity. This is the OTel-native replacement for kube-state-metrics.
+#
+# MUST be a SINGLE instance (mode: deployment, replicaCount: 1). On a DaemonSet every node would
+# emit the whole cluster's state → identical series from N senders → the central Prometheus
+# remote-write rejects them as duplicate/out-of-order. (Same reason the gateway runs 1 replica.)
+#
+#   API server ─watch─▶ [ k8s_cluster ] ─OTLP(private, over peering)─▶ otel-collector.obs.internal
+mode: deployment
+replicaCount: 1
+fullnameOverride: bankobs-cluster
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+command:
+  name: otelcol-contrib
+
+presets:
+  clusterMetrics: { enabled: true }   # k8s_cluster receiver + cluster-wide RBAC (get/list/watch)
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { memory: 512Mi }
+
+config:
+  receivers:
+    k8s_cluster:
+      collection_interval: 15s
+      allocatable_types_to_report: [cpu, memory, ephemeral-storage, pods]
+  processors:
+    memory_limiter: { check_interval: 5s, limit_percentage: 80, spike_limit_percentage: 25 }
+    batch:          { timeout: 5s, send_batch_size: 1024 }
+    resource:
+      attributes:
+        - { key: deployment.environment, value: training, action: upsert }
+        - { key: k8s.cluster.name, value: obs-v1-bankobs, action: upsert }
+  exporters:
+    otlp:
+      endpoint: otel-collector.obs.internal:4317   # central gateway, across the VPC peering
+      tls: { insecure: true }
+    debug: { verbosity: basic }
+  service:
+    pipelines:
+      metrics:
+        receivers: [k8s_cluster]
+        processors: [memory_limiter, resource, batch]
+        exporters: [otlp]

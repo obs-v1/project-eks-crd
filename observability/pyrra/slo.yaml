@@ -1,0 +1,23 @@
+# The whole SLO — about a dozen lines. From this, Pyrra GENERATES the recording rules
+# and the four multi-window, multi-burn-rate alerts (the 3.1.7 recipe) as a PrometheusRule,
+# and renders the live error budget + burn rate in its UI. You never hand-write the math.
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: demo-app-availability
+  namespace: monitoring
+  labels:
+    pyrra.dev/team: payments
+spec:
+  target: "99.9"            # 99.9% of requests must succeed...
+  window: 1d                # ...over a rolling 1d. LAB-SCALED: Pyrra derives a 5m fast-burn window
+                            # from this, so under heavy errors the fast page fires in ~5 min and the
+                            # budget visibly drops. In production this is 28d; same shape, slower clock.
+                            # (Don't go shorter than ~1d here — Pyrra rounds the fast window toward 0s.)
+  description: "99.9% of /work requests return non-5xx over a rolling 1d (lab-scaled)."
+  indicator:
+    ratio:
+      errors:
+        metric: http_requests_total{job="demo-app", code=~"5.."}
+      total:
+        metric: http_requests_total{job="demo-app"}

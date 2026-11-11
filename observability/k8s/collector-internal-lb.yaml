@@ -1,0 +1,37 @@
+# A dedicated INTERNAL NLB for OTLP ingest. external-dns publishes its address as
+# ${COLLECTOR_HOST} into the private zone, so BankObs (other VPC) reaches it over
+# the peering at otel-collector.obs.internal:4317 — never the public internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-internal
+  namespace: monitoring
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # This cluster runs the in-tree AWS cloud provider (no AWS Load Balancer Controller),
+    # which makes an NLB private ONLY via aws-load-balancer-internal=true. The newer
+    # aws-load-balancer-scheme annotation is honored solely by the LB Controller, so we
+    # set both for portability. NOTE: an NLB's scheme is immutable — if one was already
+    # created internet-facing, delete the Service and re-apply to get a fresh internal NLB.
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+    # external-dns 1.23 stopped honoring the legacy ".alpha." annotation prefix by default
+    # (AnnotationPrefix=external-dns.kubernetes.io/, EnableLegacyAnnotationPrefix=false), so
+    # the service source silently produced no record. Set BOTH prefixes: pre-1.23 reads
+    # .alpha., 1.23+ reads the new prefix.
+    external-dns.alpha.kubernetes.io/hostname: "${COLLECTOR_HOST}"
+    external-dns.kubernetes.io/hostname: "${COLLECTOR_HOST}"
+spec:
+  type: LoadBalancer
+  # Accept OTLP only from the two lab VPC CIDRs (obs locally + bankobs over the peering).
+  # The in-tree provider turns these into node-SG ingress rules, which is what lets the
+  # cross-VPC agent reach 4317. Keep in sync with obs_vpc_cidr / bankobs_vpc_cidr.
+  loadBalancerSourceRanges:
+    - 10.10.0.0/16
+    - 10.20.0.0/16
+  selector:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/instance: otel-collector
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: 4317, protocol: TCP }
+    - { name: otlp-http, port: 4318, targetPort: 4318, protocol: TCP }

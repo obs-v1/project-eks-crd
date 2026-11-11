@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  labels: { app: {{ .Chart.Name }}, domain: {{ .Values.domain }}, log_format: json }
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: { matchLabels: { app: {{ .Chart.Name }} } }
+  template:
+    metadata:
+      labels: { app: {{ .Chart.Name }}, domain: {{ .Values.domain }}, log_format: json }
+      # The bankobs-cluster collector agent discovers /metrics via these annotations.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: {{ .Values.service.port | quote }}
+    spec:
+      # Stop k8s injecting REDIS_PORT=tcp://ip:6379 etc. (service links), which clobbers
+      # the apps' ${REDIS_PORT:6379}-style config and breaks Spring/boot startup.
+      enableServiceLinks: false
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.registry }}/{{ .Chart.Name }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: {{ .Values.service.port }} }]
+          # Shared env: DB creds, auth secrets, and the full-observability telemetry flags.
+          envFrom:
+            - configMapRef: { name: bankobs-env }
+          env:
+            - { name: SERVICE_NAME, value: {{ .Chart.Name | quote }} }
+            - { name: SERVICE_PORT, value: {{ .Values.service.port | quote }} }
+            {{- with .Values.configOverride }}
+            # A couple of published images ship a config file that fails to parse and
+            # crash-loops the pod. This env var points the JVM at the corrected copy
+            # mounted below from the {{ $.Chart.Name }}-config ConfigMap (image-free fix).
+            - { name: {{ .env.name }}, value: {{ .env.value | quote }} }
+            {{- end }}
+          # startupProbe gates liveness/readiness until the app is up. Spring Boot JVMs
+          # here boot in 45-60s on throttled/burstable (t3) CPU; without this gate the
+          # liveness probe (fires at 30s) kills them right as they finish starting
+          # (SIGTERM / exit 143) → CrashLoopBackOff. 30x10s = up to 5 min to come up.
+          startupProbe:   { httpGet: { path: /health/live,  port: {{ .Values.service.port }} }, periodSeconds: 10, failureThreshold: 30, timeoutSeconds: 3 }
+          livenessProbe:  { httpGet: { path: /health/live,  port: {{ .Values.service.port }} }, periodSeconds: 20, failureThreshold: 3, timeoutSeconds: 3 }
+          readinessProbe: { httpGet: { path: /health/ready, port: {{ .Values.service.port }} }, periodSeconds: 10, failureThreshold: 3, timeoutSeconds: 3 }
+          {{- with .Values.configOverride }}
+          volumeMounts:
+            - { name: config-override, mountPath: /config, readOnly: true }
+          {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      {{- with .Values.configOverride }}
+      volumes:
+        - name: config-override
+          configMap: { name: {{ $.Chart.Name }}-config }
+      {{- end }}

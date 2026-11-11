@@ -1,0 +1,15 @@
+# Pyroscope — profiling backend (the 4th pillar), EBS-persistent.
+# Single-binary "all" target. Apps push profiles to http://pyroscope:4040.
+fullnameOverride: pyroscope
+
+pyroscope:
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 10Gi
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+# Single replica, "all" components in one process — plenty for the lab.
+replicaCount: 1

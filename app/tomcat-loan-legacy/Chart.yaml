@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tomcat-loan-legacy
+description: bankobs microservice tomcat-loan-legacy (legacy-stack domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

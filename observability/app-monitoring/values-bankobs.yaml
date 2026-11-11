@@ -1,0 +1,74 @@
+# BankObs alerting — the per-application "what to monitor + who is paged" file.
+# Deploy:  helm upgrade --install bankobs-monitoring ./app-monitoring -n monitoring -f app-monitoring/values-bankobs.yaml
+# (or `make app-monitoring`). Metrics come from the OTel pipeline; these are OTel-native names.
+
+app:
+  name: bankobs
+  namespace: monitoring      # CRs live where Prometheus/Alertmanager run (the obs cluster)
+
+teams:
+  # Infra/SRE — owns pod health, restarts, capacity.
+  - name: platform
+    emails: ["platform-sre@example.com"]
+  # Payments squad — owns the transaction path's RED signals; critical pages a pager inbox.
+  - name: payments
+    emails: ["payments-eng@example.com"]
+    criticalEmails: ["payments-oncall@example.com"]
+
+defaultTeam: platform
+
+# Flip to true (or `--set enableTestAlert=true`) to send yourself a probe e-mail, then turn off.
+enableTestAlert: false
+
+alerts:
+  # ── platform (infrastructure, from kubeletstats + k8s_cluster) ──────────────
+  - name: BankobsPodNotRunning
+    team: platform
+    severity: critical
+    for: 5m
+    expr: >-
+      count(k8s_pod_phase{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"} == 1
+        or k8s_pod_phase{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"} == 4
+        or k8s_pod_phase{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"} == 5) > 0
+    summary: "BankObs has pods not in Running state"
+    description: "{{ $value }} pod(s) are Pending/Failed/Unknown in the bankobs namespace."
+
+  - name: BankobsContainerRestarting
+    team: platform
+    severity: warning
+    for: 10m
+    expr: >-
+      increase(k8s_container_restarts{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"}[15m]) > 3
+    summary: "A BankObs container is restarting repeatedly"
+    description: "{{ $labels.k8s_pod_name }}/{{ $labels.k8s_container_name }} restarted >3 times in 15m."
+
+  - name: BankobsDeploymentDegraded
+    team: platform
+    severity: warning
+    for: 10m
+    expr: >-
+      (k8s_deployment_desired{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"}
+        - k8s_deployment_available{k8s_cluster_name="obs-v1-bankobs",k8s_namespace_name="bankobs"}) > 0
+    summary: "A BankObs deployment is short of its desired replicas"
+    description: "{{ $labels.k8s_deployment_name }} is missing {{ $value }} replica(s)."
+
+  # ── payments (application RED, from the spanmetrics connector) ──────────────
+  - name: BankobsHighErrorRate
+    team: payments
+    severity: critical
+    for: 10m
+    expr: >-
+      ( sum(rate(calls_total{service_namespace="bankobs",status_code="STATUS_CODE_ERROR"}[5m]))
+        / clamp_min(sum(rate(calls_total{service_namespace="bankobs"}[5m])), 1) ) > 0.05
+    summary: "BankObs error ratio over 5%"
+    description: "5m error ratio is {{ $value | humanizePercentage }} across bankobs services."
+
+  - name: BankobsHighLatencyP95
+    team: payments
+    severity: warning
+    for: 10m
+    expr: >-
+      histogram_quantile(0.95,
+        sum by (le, service_name) (rate(duration_milliseconds_bucket{service_namespace="bankobs"}[5m]))) > 1500
+    summary: "BankObs p95 latency over 1.5s"
+    description: "{{ $labels.service_name }} p95 latency is {{ $value }} ms."

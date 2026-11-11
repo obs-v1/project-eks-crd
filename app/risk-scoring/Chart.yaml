@@ -1,0 +1,6 @@
+apiVersion: v2
+name: risk-scoring
+description: bankobs microservice risk-scoring (fraud-risk domain)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
