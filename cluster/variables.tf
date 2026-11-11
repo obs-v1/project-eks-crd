@@ -75,7 +75,10 @@ variable "public_api_access_cidrs" {
 variable "obs_node_instance_types" {
   description = "Instance types for the observability cluster's Spot node group."
   type        = list(string)
-  default     = ["t3.xlarge"]
+  # Several SAME-SIZE (4 vCPU / 16 GiB) families so the capacity-optimized Spot
+  # strategy has multiple pools to draw from WITHIN the single pinned AZ. A single
+  # type here = a single Spot pool = 0 nodes the moment it's UnfulfillableCapacity.
+  default     = ["t3.xlarge", "t3a.xlarge", "m5.xlarge", "m5a.xlarge", "m6i.xlarge", "m6a.xlarge"]
 }
 
 variable "obs_node_scaling" {
@@ -87,7 +90,9 @@ variable "obs_node_scaling" {
 variable "bankobs_node_instance_types" {
   description = "Instance types for the bankobs cluster's Spot node group (bigger: 60 svcs + stateful DBs)."
   type        = list(string)
-  default     = ["t3.2xlarge"]
+  # Several SAME-SIZE (8 vCPU / 32 GiB) families — same rationale as obs above:
+  # one pinned AZ, but many Spot pools so a single pool drying up can't zero the cluster.
+  default     = ["t3.2xlarge", "t3a.2xlarge", "m5.2xlarge", "m5a.2xlarge", "m6i.2xlarge", "m6a.2xlarge"]
 }
 
 variable "bankobs_node_scaling" {
