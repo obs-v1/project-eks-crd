@@ -86,7 +86,7 @@ You need three CLIs and the two clusters already provisioned by `../cluster`:
 
 ```bash
 kubectl version --client      # any recent kubectl
-helm version                  # Helm 3.12+
+helm version                  # Helm 3.12+ (Helm 4.x works too)
 aws sts get-caller-identity   # AWS creds for us-east-1, account 739561048503
 ```
 
@@ -133,10 +133,11 @@ helm repo add jaegertracing        https://jaegertracing.github.io/helm-charts
 helm repo update
 ```
 
-**Verify:**
+**Verify** the pinned chart version is available (the repo's newest may be higher than `92.17.0` —
+that's fine, we install a pinned version, not the latest):
 
 ```bash
-helm search repo kube-prometheus-stack --versions | head -1   # should list 92.17.0
+helm search repo kube-prometheus-stack --version 92.17.0   # must print exactly 92.17.0
 ```
 
 ---
@@ -323,6 +324,11 @@ helm --kube-context obs-v1-observability upgrade --install otel-collector \
 
 It must come **after** Jaeger/Loki/Prometheus exist, because those are its export targets.
 
+> **Expected on install:** the chart prints a few `[DEPRECATION]` lines auto-rewriting exporter names
+> (`otlp` → `otlp_grpc`, `otlphttp` → `otlp_http`). This is **harmless** with the pinned chart
+> `0.178.1` — the values file uses the old names and the chart rewrites them for you. (You'll see the
+> same lines in Steps 12–13, which use the same chart.)
+
 **Verify:**
 
 ```bash
@@ -375,7 +381,16 @@ to it over the peering — never the public internet. It only accepts the two la
 ```bash
 kubectl --context obs-v1-observability -n monitoring get svc otel-collector-internal \
   -o wide   # EXTERNAL-IP = an internal-... NLB hostname
-nslookup otel-collector.obs.internal   # resolves once external-dns syncs (give it ~1–2 min)
+```
+
+> The private name `otel-collector.obs.internal` resolves **only inside the obs/bankobs VPCs** — the
+> private hosted zone is associated with those two VPCs, not your workstation's. `nslookup` from the
+> workstation returns **NXDOMAIN, which is expected and not a failure.** Verify it from a pod in the
+> app cluster instead (once external-dns syncs, ~1–2 min):
+
+```bash
+kubectl --context obs-v1-bankobs -n monitoring run dns-check --rm -it --restart=Never \
+  --image=busybox:1.36 -- nslookup otel-collector.obs.internal   # resolves to the internal NLB
 ```
 
 ---
@@ -532,7 +547,9 @@ kubectl --context obs-v1-observability -n monitoring get alertmanagerconfig bank
 
 ## Final end-to-end check
 
-After a minute or two of traffic, confirm all four pillars land in Grafana:
+After a few minutes of traffic, confirm all four pillars land in Grafana. (The **app cluster's**
+metrics only begin flowing once the internal NLB's targets pass health checks — allow ~3–5 min before
+the metrics check below lists `obs-v1-bankobs`.)
 
 ```bash
 # Metrics — both clusters report (OTel-only):
