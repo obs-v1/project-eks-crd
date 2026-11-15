@@ -298,10 +298,30 @@ spec:
           annotations:
             summary: "{{ $svc }} container restarting repeatedly"
             description: "a {{ $svc }} container restarted more than 3 times in 15m."
-    # Recording rules that expose THIS service's alert thresholds as series, so the Grafana RED
-    # dashboard can draw each service's OWN limit line — sourced from this chart's monitoring
-    # block, not hardcoded in the dashboard. Error rate is the raw ratio (the board ×100 for %);
-    # latency is ms. Constant via vector(); the labels make it per-service.
+{{- end }}
+EOF
+
+  # Dashboard threshold series — exposes THIS service's alert thresholds (from its monitoring
+  # block) as constant recording-rule series so the Grafana RED boards can draw each service's
+  # OWN limit line, sourced from the chart (not hardcoded in the dashboard). These are a
+  # DASHBOARD dependency, so `make dashboards` applies them (same obs cluster as Grafana) — NOT
+  # `make app-monitoring`, which only does alerts + routing. Gated by monitoring.enabled for the
+  # same two-cluster reason as the rule/routing. Error rate is the raw ratio (board ×100 for %).
+  cat > "$svc/templates/thresholds.yaml" <<'EOF'
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $svc }}-dashboard-thresholds
+  namespace: {{ $m.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: bankobs-dashboards
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  groups:
     - name: {{ $svc }}.thresholds
       rules:
         - record: bankobs:alert_error_rate_threshold

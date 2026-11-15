@@ -132,7 +132,15 @@ pipeline-test-off: namespace
 # so DASHBOARD-PROMPTS.md is ignored. Needs kps (Grafana + sidecar) deployed first.
 dashboards: namespace
 	$(K) apply -f dashboards/
-	@echo "  ✓ BankObs dashboards applied (sidecar loads them into Grafana → BankObs folder)."
+	@echo "  → applying each service's chart-sourced dashboard threshold series (from $(APP_DIR)/*/)…"
+	@n=0; for d in $(APP_DIR)/*/ ; do \
+	  svc=$$(basename $$d); \
+	  [ -f "$$d/templates/thresholds.yaml" ] || continue; \
+	  helm template $$svc $$d -s templates/thresholds.yaml \
+	    --set monitoring.enabled=true --set monitoring.namespace=$(NS) 2>/dev/null \
+	    | $(K) apply -f - >/dev/null && n=$$((n+1)) || echo "    ⚠ $$svc thresholds skipped"; \
+	done; \
+	echo "  ✓ BankObs dashboards applied (sidecar → BankObs folder) + $$n per-service threshold series (the boards' limit lines)."
 
 loki: namespace
 	$(H) loki grafana/loki --version 7.5.0 $(HN) -f values/loki.yaml
@@ -167,6 +175,7 @@ ingress: namespace
 destroy:
 	-helm --kube-context $(CONTEXT) uninstall bankobs-monitoring $(HN)
 	-$(K) delete prometheusrule -l app.kubernetes.io/managed-by=app-monitoring $(HN) --ignore-not-found
+	-$(K) delete prometheusrule -l app.kubernetes.io/managed-by=bankobs-dashboards $(HN) --ignore-not-found
 	-$(K) delete alertmanagerconfig -l app.kubernetes.io/managed-by=app-monitoring $(HN) --ignore-not-found
 	-$(K) delete -f pyrra/slo.yaml --ignore-not-found
 	-$(K) delete -f pyrra/pyrra.yaml --ignore-not-found

@@ -1,0 +1,23 @@
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $svc }}-dashboard-thresholds
+  namespace: {{ $m.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: bankobs-dashboards
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  groups:
+    - name: {{ $svc }}.thresholds
+      rules:
+        - record: bankobs:alert_error_rate_threshold
+          expr: vector({{ $m.errorRateThreshold }})
+          labels: { app: {{ $m.app | quote }}, service: {{ $svc | quote }}, service_name: {{ $svc | quote }} }
+        - record: bankobs:alert_latency_p95_threshold_ms
+          expr: vector({{ $m.latencyP95Ms }})
+          labels: { app: {{ $m.app | quote }}, service: {{ $svc | quote }}, service_name: {{ $svc | quote }} }
+{{- end }}
