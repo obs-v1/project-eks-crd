@@ -298,6 +298,18 @@ spec:
           annotations:
             summary: "{{ $svc }} container restarting repeatedly"
             description: "a {{ $svc }} container restarted more than 3 times in 15m."
+    # Recording rules that expose THIS service's alert thresholds as series, so the Grafana RED
+    # dashboard can draw each service's OWN limit line — sourced from this chart's monitoring
+    # block, not hardcoded in the dashboard. Error rate is the raw ratio (the board ×100 for %);
+    # latency is ms. Constant via vector(); the labels make it per-service.
+    - name: {{ $svc }}.thresholds
+      rules:
+        - record: bankobs:alert_error_rate_threshold
+          expr: vector({{ $m.errorRateThreshold }})
+          labels: { app: {{ $m.app | quote }}, service: {{ $svc | quote }}, service_name: {{ $svc | quote }} }
+        - record: bankobs:alert_latency_p95_threshold_ms
+          expr: vector({{ $m.latencyP95Ms }})
+          labels: { app: {{ $m.app | quote }}, service: {{ $svc | quote }}, service_name: {{ $svc | quote }} }
 {{- end }}
 EOF
 

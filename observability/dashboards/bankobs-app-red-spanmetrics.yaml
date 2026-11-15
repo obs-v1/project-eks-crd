@@ -67,7 +67,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "color": { "mode": "thresholds" },
             "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
           "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
-            "expr": "100 * sum(rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) / clamp_min(sum(rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001)" } ] },
+            "expr": "100 * (sum(rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001)" } ] },
 
         { "id": 4, "type": "stat", "title": "Latency p95 (ms)",
           "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
@@ -115,22 +115,40 @@ data:
             "expr": "topk(12, sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))",
             "legendFormat": "{{service_name}}" } ] },
 
-        { "id": 10, "type": "timeseries", "title": "Error rate by service (%)",
+        { "id": 10, "type": "timeseries", "title": "Error rate by service (%) — dashed = this service's alert threshold",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
           "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
           "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 },
-            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
-          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
-            "expr": "topk(12, 100 * sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) / clamp_min(sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001))",
-            "legendFormat": "{{service_name}}" } ] },
+            "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } },
+            "overrides": [ { "matcher": { "id": "byRegexp", "options": "/^alert threshold/" }, "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [ 10, 10 ] } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "semi-dark-red" } } ] } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "topk(12, 100 * (sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) or 0 * sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))) / clamp_min(sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001))",
+            "legendFormat": "{{service_name}}" },
+            { "refId": "T", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "100 * bankobs:alert_error_rate_threshold{service_name=~\"$service\"}",
+            "legendFormat": "alert threshold {{service_name}}" } ] },
 
-        { "id": 11, "type": "timeseries", "title": "Latency p95 by service (ms)",
+        { "id": 11, "type": "timeseries", "title": "Latency p95 by service (ms) — dashed = this service's alert threshold",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
           "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
-          "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 5 } } },
-          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 5 } },
+            "overrides": [ { "matcher": { "id": "byRegexp", "options": "/^alert threshold/" }, "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [ 10, 10 ] } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.lineWidth", "value": 1 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "semi-dark-red" } } ] } ] },
+          "targets": [
+            { "refId": "A", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
             "expr": "topk(10, histogram_quantile(0.95, sum by (le, service_name) (rate(duration_milliseconds_bucket{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))))",
-            "legendFormat": "{{service_name}}" } ] },
+            "legendFormat": "{{service_name}}" },
+            { "refId": "T", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "bankobs:alert_latency_p95_threshold_ms{service_name=~\"$service\"}",
+            "legendFormat": "alert threshold {{service_name}}" } ] },
 
         { "id": 12, "type": "table", "title": "Services (click a service → per-service boards)",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
@@ -140,7 +158,7 @@ data:
             { "refId": "A", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
               "expr": "sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))" },
             { "refId": "B", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
-              "expr": "100 * sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) / clamp_min(sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001)" },
+              "expr": "100 * (sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) or 0 * sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval]))) / clamp_min(sum by (service_name) (rate(calls_total{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])), 0.001)" },
             { "refId": "C", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
               "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate(duration_milliseconds_bucket{service_name=~\"$service\", span_kind=\"SPAN_KIND_SERVER\"}[$__rate_interval])))" }
           ],
@@ -177,6 +195,31 @@ data:
           "datasource": { "type": "loki", "uid": "${ds_loki}" },
           "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" },
           "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "maxLines": 300,
-            "expr": "{service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b`" } ] }
+            "expr": "{service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b`" } ] },
+
+        { "id": 15, "type": "row", "title": "Active alerts (each service's own PrometheusRule)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 }, "collapsed": false },
+
+        { "id": 16, "type": "table", "title": "Firing / pending alerts for $service",
+          "description": "Reads Prometheus ALERTS — the alerts each app/<svc> chart's PrometheusRule defines. Rows appear only while an alert is pending or firing.",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 42 },
+          "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+          "options": { "sortBy": [ { "displayName": "Severity", "desc": true } ] },
+          "targets": [ { "refId": "A", "instant": true, "format": "table", "datasource": { "type": "prometheus", "uid": "${ds_prom}" },
+            "expr": "ALERTS{app=\"bankobs\", service=~\"$service\", alertstate=~\"firing|pending\"}" } ],
+          "transformations": [
+            { "id": "organize", "options": {
+              "excludeByName": { "Time": true, "Value": true, "__name__": true, "app": true, "alertstate": false },
+              "renameByName": { "alertname": "Alert", "service": "Service", "severity": "Severity", "team": "Team", "alertstate": "State" },
+              "indexByName": { "Alert": 0, "Service": 1, "Severity": 2, "State": 3, "Team": 4 } } }
+          ],
+          "fieldConfig": { "defaults": {}, "overrides": [
+            { "matcher": { "id": "byName", "options": "Severity" }, "properties": [
+              { "id": "mappings", "value": [ { "type": "value", "options": {
+                "critical": { "color": "red", "index": 0 }, "warning": { "color": "yellow", "index": 1 }, "info": { "color": "blue", "index": 2 } } } ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } } ] },
+            { "matcher": { "id": "byName", "options": "Alert" }, "properties": [
+              { "id": "links", "value": [
+                { "title": "Per-service RED", "url": "/d/bankobs-red-spanmetrics?var-service=${__data.fields.Service}&${__url_time_range}" } ] } ] }
+          ] } }
       ]
     }

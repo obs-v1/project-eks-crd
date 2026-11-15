@@ -59,6 +59,20 @@ DATA REALITY
 - Datasource UIDs: prometheus, loki, jaeger, pyroscope. Reference them via datasource template
   variables (${ds_loki} etc.), never a hardcoded uid.
 
+CHART-SOURCED ALERT THRESHOLDS + ALERTS (the per-service alerting model)
+- WHAT each service alerts on lives in its own Helm chart (app/<svc>, monitoring: block) and is
+  rendered as a per-service PrometheusRule + AlertmanagerConfig. Those charts ALSO emit their
+  thresholds as constant recording-rule series so dashboards draw each service's OWN limit line
+  instead of a hardcoded one:
+    bankobs:alert_error_rate_threshold{app="bankobs",service=<svc>,service_name=<svc>}   (raw ratio; ×100 for %)
+    bankobs:alert_latency_p95_threshold_ms{...}                                           (ms)
+  On an "error rate by service" / "p95 by service" panel, add a second target plotting the matching
+  threshold series (legend "alert threshold …") and style it as a dashed line via a byRegexp
+  override — so the limit shown always matches that service's chart, with nothing hardcoded.
+- Firing alerts are queryable from Prometheus via ALERTS{app="bankobs",service=~"$service",
+  alertstate=~"firing|pending"} (labels: alertname, service, severity, team, alertstate). A table
+  panel on these gives an "active alerts for this service" view that tracks the per-service rules.
+
 CLICK-THROUGH (HARD REQUIREMENT, inherited from datasource config — do not rebuild it):
   log line --trace_id--> Jaeger trace --tracesToLogsV2--> Loki logs  (--> Pyroscope profile)
   EVERY dashboard MUST include at least one Loki logs panel (so trace_id is clickable → Jaeger)
@@ -72,6 +86,13 @@ LOKI FACTS
   |~ `(?i)\b(error|exception|fatal|panic)\b`
 - Service dropdown variable: label_values({service_namespace="bankobs"}, service_name)
 - Rates use [$__rate_interval]; a "request rate" proxy for bankobs is log-line rate.
+- EMPTY-STATE FIX (spanmetrics error rate): `calls_total` only ever carries status_code=STATUS_CODE_UNSET
+  until a real error occurs — there is NO STATUS_CODE_ERROR series in a healthy system. So a naive
+  `sum(rate(...status_code="STATUS_CODE_ERROR"...))` is EMPTY and the panel renders "No data", not 0%.
+  Always make error-rate yield zero: single value → `100 * (sum(rate(err)) or vector(0)) / clamp_min(sum(rate(all)),0.001)`;
+  by-service → `... (sum by (service_name)(rate(err)) or 0 * sum by (service_name)(rate(all))) / clamp_min(sum by (service_name)(rate(all)),0.001)`
+  so every active service shows 0 rather than dropping out. (STATUS_CODE_ERROR is the correct value — the
+  empties were healthy-system, not a label bug.)
 
 PROMETHEUS FACTS
 - BankObs RED (from spanmetrics, these ARE per bankobs service):
