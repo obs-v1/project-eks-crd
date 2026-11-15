@@ -12,3 +12,20 @@ observabilityMode: full
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 500m, memory: 512Mi }
+
+# ── This service's OWN alerting (rendered by templates/prometheusrule.yaml) ──────────────
+# enabled is false here on purpose: the normal app release goes to the bankobs cluster, but
+# the PrometheusRule CRD + Prometheus Operator live on the OBS cluster. The observability
+# `make app-monitoring` loop renders this with --set monitoring.enabled=true and applies it
+# to the obs cluster. Routing (who is paged) is the central app-monitoring AlertmanagerConfig,
+# which matches on app=bankobs plus the team/severity labels stamped on each rule below.
+monitoring:
+  enabled: false
+  app: bankobs                 # umbrella label the central AlertmanagerConfig routes on
+  namespace: monitoring        # where Prometheus/Alertmanager watch (obs cluster)
+  cluster: obs-v1-bankobs      # k8s_cluster_name stamped on this service's infra metrics
+  serviceNamespace: bankobs    # service_namespace (spanmetrics) + k8s_namespace_name (infra)
+  team: payments                  # RED alerts (error rate / latency) page this team
+  infraTeam: platform          # pod / deployment health pages SRE
+  errorRateThreshold: 0.05     # HighErrorRate fires above this 5m error ratio
+  latencyP95Ms: 1500           # HighLatencyP95 fires above this p95, in ms

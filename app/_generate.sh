@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Generates one self-contained Helm chart folder per bankobs microservice:
-#   <svc>/{Chart.yaml, values.yaml, Dockerfile, Makefile, templates/{deployment,service}.yaml}
+#   <svc>/{Chart.yaml, values.yaml, Dockerfile, Makefile,
+#          templates/{deployment,service,prometheusrule}.yaml}
+#
+# Each chart owns its OWN alerting: templates/prometheusrule.yaml renders a per-service
+# PrometheusRule (RED + pod/deploy health, scoped to that one service_name). It is gated by
+# monitoring.enabled (default false) because the CRD + Prometheus Operator live on the OBS
+# cluster, not the bankobs cluster this chart deploys to — the obs `make app-monitoring` loop
+# renders it with monitoring.enabled=true and applies it to the obs cluster. Routing (who is
+# paged) stays in the one central app-monitoring AlertmanagerConfig.
 #
 # There is NO service source here. The Dockerfile is a passthrough `FROM` the published
 # image, so a student can rebuild, push to THEIR OWN registry and run their own CI/CD —
@@ -79,6 +87,11 @@ gen() {
   local svc=$1 domain=$2 port=$3 replicas=$4
   mkdir -p "$svc/templates"
 
+  # RED alerts for a service page the team that owns it. The payments domain is the
+  # transaction path (its own on-call); everything else rolls up to platform/SRE.
+  local team=platform
+  [ "$domain" = "payments" ] && team=payments
+
   cat > "$svc/Chart.yaml" <<EOF
 apiVersion: v2
 name: $svc
@@ -103,6 +116,23 @@ observabilityMode: full
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 500m, memory: 512Mi }
+
+# ── This service's OWN alerting (rendered by templates/prometheusrule.yaml) ──────────────
+# enabled is false here on purpose: the normal app release goes to the bankobs cluster, but
+# the PrometheusRule CRD + Prometheus Operator live on the OBS cluster. The observability
+# \`make app-monitoring\` loop renders this with --set monitoring.enabled=true and applies it
+# to the obs cluster. Routing (who is paged) is the central app-monitoring AlertmanagerConfig,
+# which matches on app=bankobs plus the team/severity labels stamped on each rule below.
+monitoring:
+  enabled: false
+  app: bankobs                 # umbrella label the central AlertmanagerConfig routes on
+  namespace: monitoring        # where Prometheus/Alertmanager watch (obs cluster)
+  cluster: obs-v1-bankobs      # k8s_cluster_name stamped on this service's infra metrics
+  serviceNamespace: bankobs    # service_namespace (spanmetrics) + k8s_namespace_name (infra)
+  team: $team                  # RED alerts (error rate / latency) page this team
+  infraTeam: platform          # pod / deployment health pages SRE
+  errorRateThreshold: 0.05     # HighErrorRate fires above this 5m error ratio
+  latencyP95Ms: 1500           # HighLatencyP95 fires above this p95, in ms
 EOF
 
   cat > "$svc/Dockerfile" <<EOF
@@ -180,6 +210,79 @@ spec:
   selector: { app: {{ .Chart.Name }} }
   ports:
     - { name: http, port: {{ .Values.service.port }}, targetPort: {{ .Values.service.port }} }
+EOF
+
+  # Per-service alerting CRD. Gated by monitoring.enabled (see values.yaml) so it renders ONLY
+  # for the obs-cluster `make app-monitoring` loop, never in the bankobs app release. PromQL `{...}`
+  # is single-brace so Helm leaves it alone; Prometheus templating is escaped as {{ "{{ ... }}" }}
+  # so a literal {{ ... }} reaches the rendered rule.
+  cat > "$svc/templates/prometheusrule.yaml" <<'EOF'
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+# WHAT to alert on for {{ $svc }} — scoped to this one service. RED (error rate + p95 latency)
+# from the spanmetrics connector; pod/deployment health from kubeletstats + k8s_cluster. WHO is
+# paged is the central AlertmanagerConfig, which routes on the app/team/severity labels here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $svc }}-alerts
+  namespace: {{ $m.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: app-monitoring
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  groups:
+    - name: {{ $svc }}.alerts
+      rules:
+        # ── RED (spanmetrics) → the service's own team ──────────────────────────────────
+        - alert: {{ $svc }}HighErrorRate
+          expr: >-
+            ( sum(rate(calls_total{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}",status_code="STATUS_CODE_ERROR"}[5m]))
+              / clamp_min(sum(rate(calls_total{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}"}[5m])), 1) ) > {{ $m.errorRateThreshold }}
+          for: 5m
+          labels: { severity: "critical", team: {{ $m.team | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} error ratio over {{ $m.errorRateThreshold }}"
+            description: "5m error ratio for {{ $svc }} is {{ "{{ $value | humanizePercentage }}" }}."
+        - alert: {{ $svc }}HighLatencyP95
+          expr: >-
+            histogram_quantile(0.95, sum by (le) (rate(duration_milliseconds_bucket{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}"}[5m]))) > {{ $m.latencyP95Ms }}
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.team | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} p95 latency over {{ $m.latencyP95Ms }}ms"
+            description: "{{ $svc }} p95 latency is {{ "{{ $value }}" }} ms."
+        # ── pod / deployment health (kubeletstats + k8s_cluster) → SRE ──────────────────
+        - alert: {{ $svc }}DeploymentDegraded
+          expr: >-
+            (k8s_deployment_desired{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}
+              - k8s_deployment_available{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}) > 0
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} is short of its desired replicas"
+            description: "{{ $svc }} is missing {{ "{{ $value }}" }} replica(s)."
+        - alert: {{ $svc }}PodNotRunning
+          expr: >-
+            count(k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 1
+              or k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 4
+              or k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 5) > 0
+          for: 5m
+          labels: { severity: "critical", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} has pod(s) not in Running state"
+            description: "{{ "{{ $value }}" }} {{ $svc }} pod(s) are Pending/Failed/Unknown."
+        - alert: {{ $svc }}ContainerRestarting
+          expr: >-
+            increase(k8s_container_restarts{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"}[15m]) > 3
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} container restarting repeatedly"
+            description: "a {{ $svc }} container restarted more than 3 times in 15m."
+{{- end }}
 EOF
 
   {

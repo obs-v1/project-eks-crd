@@ -13,7 +13,7 @@ spec:
   route:
     # Everything for this app enters here; the fallback receiver is the default team's.
     receiver: {{ include "app-monitoring.receiver" (dict "app" .Values.app.name "team" .Values.defaultTeam) }}
-    groupBy: ["alertname", "team", "app"]
+    groupBy: ["alertname", "team", "app", "service"]
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h

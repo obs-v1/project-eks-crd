@@ -1,0 +1,66 @@
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+# WHAT to alert on for {{ $svc }} — scoped to this one service. RED (error rate + p95 latency)
+# from the spanmetrics connector; pod/deployment health from kubeletstats + k8s_cluster. WHO is
+# paged is the central AlertmanagerConfig, which routes on the app/team/severity labels here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $svc }}-alerts
+  namespace: {{ $m.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: app-monitoring
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  groups:
+    - name: {{ $svc }}.alerts
+      rules:
+        # ── RED (spanmetrics) → the service's own team ──────────────────────────────────
+        - alert: {{ $svc }}HighErrorRate
+          expr: >-
+            ( sum(rate(calls_total{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}",status_code="STATUS_CODE_ERROR"}[5m]))
+              / clamp_min(sum(rate(calls_total{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}"}[5m])), 1) ) > {{ $m.errorRateThreshold }}
+          for: 5m
+          labels: { severity: "critical", team: {{ $m.team | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} error ratio over {{ $m.errorRateThreshold }}"
+            description: "5m error ratio for {{ $svc }} is {{ "{{ $value | humanizePercentage }}" }}."
+        - alert: {{ $svc }}HighLatencyP95
+          expr: >-
+            histogram_quantile(0.95, sum by (le) (rate(duration_milliseconds_bucket{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}"}[5m]))) > {{ $m.latencyP95Ms }}
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.team | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} p95 latency over {{ $m.latencyP95Ms }}ms"
+            description: "{{ $svc }} p95 latency is {{ "{{ $value }}" }} ms."
+        # ── pod / deployment health (kubeletstats + k8s_cluster) → SRE ──────────────────
+        - alert: {{ $svc }}DeploymentDegraded
+          expr: >-
+            (k8s_deployment_desired{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}
+              - k8s_deployment_available{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}) > 0
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} is short of its desired replicas"
+            description: "{{ $svc }} is missing {{ "{{ $value }}" }} replica(s)."
+        - alert: {{ $svc }}PodNotRunning
+          expr: >-
+            count(k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 1
+              or k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 4
+              or k8s_pod_phase{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"} == 5) > 0
+          for: 5m
+          labels: { severity: "critical", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} has pod(s) not in Running state"
+            description: "{{ "{{ $value }}" }} {{ $svc }} pod(s) are Pending/Failed/Unknown."
+        - alert: {{ $svc }}ContainerRestarting
+          expr: >-
+            increase(k8s_container_restarts{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"}[15m]) > 3
+          for: 10m
+          labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} container restarting repeatedly"
+            description: "a {{ $svc }} container restarted more than 3 times in 15m."
+{{- end }}

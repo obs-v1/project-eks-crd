@@ -8,7 +8,7 @@ is and verify it before moving on.
 > **This is the CRD-alerting variant** (`project-eks-crd`). Metric collection is identical to the
 > base `project-eks` (OTel-only), but alerting is defined declaratively with Prometheus Operator CRDs
 > and delivered by Amazon SES e-mail. Two extra steps appear below — the **SES secret** (Step 3b) and
-> the per-app **alerting chart** (Step 14). The full alerting design, SES setup and verification live
+> the **alerting** step (Step 14: per-service rules + central routing). The full alerting design, SES setup and verification live
 > in **[ALERTING-CRD.md](ALERTING-CRD.md)**; this guide just slots them into the deploy order.
 
 > The cluster itself (two EKS clusters, VPC peering, private zone, Traefik, external-dns, EBS CSI)
@@ -72,7 +72,7 @@ scrapers are **disabled** — see `values/kube-prometheus-stack.yaml`.
 | 11 | Dashboards | `dashboards/*.yaml` | — | Grafana sidecar auto-loads them |
 | 12 | OBS collectors | `agent/values-obs-*.yaml` | `0.178.1` | this cluster's own infra metrics |
 | 13 | BankObs collectors | `agent/values-*.yaml` | `0.178.1` | the app cluster's metrics + logs |
-| 14 | App alerting (CRDs) | `app-monitoring/` chart | — | per-app `PrometheusRule` + `AlertmanagerConfig` (what to alert on / who is paged) |
+| 14 | App alerting (CRDs) | `app-monitoring/` + `app/<svc>/` | — | per-service `PrometheusRule` (what to alert on) + one central `AlertmanagerConfig` (who is paged) |
 
 > **Shortcut:** `make all DOMAIN=lab.example.com SES_SMTP_USERNAME=… SES_SMTP_PASSWORD=… SES_FROM=…`
 > runs every step (3b and 14 included) in exactly this order. The steps below are the same thing, one
@@ -517,30 +517,43 @@ kubectl --context obs-v1-bankobs -n monitoring get pods | grep -E 'bankobs-agent
 
 ## Step 14 — App alerting (CRDs)
 
-Deploy the per-application alerting as CRDs — a `PrometheusRule` (what to alert on, PromQL over the
-OTel metrics) and an `AlertmanagerConfig` (which team/e-mail each alert routes to).
+Alerting is split in two: **what to alert on** lives per service — each `app/<svc>` chart carries its
+own `PrometheusRule` (RED + pod/deploy health, scoped to that one `service_name`) — and **who is
+paged** is one central `AlertmanagerConfig` (team → e-mail) rendered by the `app-monitoring` chart.
 
 ```bash
 make app-monitoring
 ```
 
-Expands to:
+Does two things:
 
 ```bash
+# 1. routing (who is paged) — the central AlertmanagerConfig (+ an optional pipeline probe)
 helm --kube-context obs-v1-observability upgrade --install bankobs-monitoring ./app-monitoring \
   -n monitoring -f app-monitoring/values-bankobs.yaml
+
+# 2. rules (what to alert on) — render EACH service's own PrometheusRule and apply it to THIS
+#    (obs) cluster, where the Prometheus Operator + CRDs live. The normal app release lands on the
+#    bankobs cluster and keeps monitoring.enabled=false (that cluster has no PrometheusRule CRD),
+#    so the rules are shipped here instead:
+for d in ../app/*/ ; do svc=$(basename "$d"); \
+  helm template "$svc" "$d" --show-only templates/prometheusrule.yaml --set monitoring.enabled=true \
+  | kubectl --context obs-v1-observability -n monitoring apply -f - ; done
 ```
 
-Add another app by writing `app-monitoring/values-<app>.yaml` and installing a second release. The
-operator merges each `AlertmanagerConfig` into the base SES config from Step 3 — no kps change needed.
-Design, alert catalogue and a live test (`--set enableTestAlert=true`) are in
+Each service's rules carry `team`/`severity` labels and route through the one central
+`AlertmanagerConfig`; the operator merges it into the base SES config from Step 3 — no kps change
+needed. To tune a service's thresholds or team, edit its `app/<svc>/values.yaml` `monitoring:` block.
+Design, the per-service rule set and a live test (`--set enableTestAlert=true`) are in
 **[ALERTING-CRD.md](ALERTING-CRD.md)**.
 
 **Verify:**
 
 ```bash
-kubectl --context obs-v1-observability -n monitoring get prometheusrule bankobs-alerts
 kubectl --context obs-v1-observability -n monitoring get alertmanagerconfig bankobs-routing
+# the 59 per-service rules (one PrometheusRule <svc>-alerts each):
+kubectl --context obs-v1-observability -n monitoring get prometheusrule -l app.kubernetes.io/managed-by=app-monitoring
+kubectl --context obs-v1-observability -n monitoring get prometheusrule payment-gateway-alerts -o yaml | grep -A1 'alert:'
 ```
 
 ---
