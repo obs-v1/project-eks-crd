@@ -62,8 +62,9 @@ DATA REALITY
 CHART-SOURCED ALERT THRESHOLDS + ALERTS (the per-service alerting model)
 - WHAT each service alerts on lives in its own Helm chart (app/<svc>, monitoring: block) and is
   rendered as a per-service PrometheusRule + AlertmanagerConfig. Those charts ALSO emit their
-  thresholds as constant recording-rule series so dashboards draw each service's OWN limit line
-  instead of a hardcoded one:
+  thresholds as constant recording-rule series (from app/<svc>/templates/thresholds.yaml, applied by
+  `make dashboards` — it is a dashboard dependency, not part of `make app-monitoring`) so dashboards
+  draw each service's OWN limit line instead of a hardcoded one:
     bankobs:alert_error_rate_threshold{app="bankobs",service=<svc>,service_name=<svc>}   (raw ratio; ×100 for %)
     bankobs:alert_latency_p95_threshold_ms{...}                                           (ms)
   On an "error rate by service" / "p95 by service" panel, add a second target plotting the matching
