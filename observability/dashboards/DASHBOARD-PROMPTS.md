@@ -93,7 +93,13 @@ LOKI FACTS
   Always make error-rate yield zero: single value → `100 * (sum(rate(err)) or vector(0)) / clamp_min(sum(rate(all)),0.001)`;
   by-service → `... (sum by (service_name)(rate(err)) or 0 * sum by (service_name)(rate(all))) / clamp_min(sum by (service_name)(rate(all)),0.001)`
   so every active service shows 0 rather than dropping out. (STATUS_CODE_ERROR is the correct value — the
-  empties were healthy-system, not a label bug.)
+  empties were healthy-system, not a label bug.) SAME fix applies to LOG-based (Loki) health panels:
+  wrap `sum(rate({...} |~ ...))` and `count(count by (service_name) (...))` with `( ... or vector(0))`
+  so the stats read 0, not "No data", in a quiet system.
+- LOKI LINE-FILTER ESCAPING GOTCHA: the error line filter is a backtick (raw) string, so a word boundary
+  is `\b` — in the dashboard JSON that is `\\b` (JSON-escapes the one backslash). Writing `\\\\b` in the
+  JSON sends `\\b` to Loki, i.e. a literal backslash+b, which matches NOTHING — the error panels look
+  broken/empty forever. Correct form in the JSON file: `|~ ` + backtick + `(?i)\\b(error|exception|fatal|panic)\\b` + backtick.
 
 PROMETHEUS FACTS
 - BankObs RED (from spanmetrics, these ARE per bankobs service):

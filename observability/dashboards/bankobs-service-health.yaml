@@ -57,7 +57,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "logs", "color": { "mode": "thresholds" } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} [$__rate_interval]))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} [$__rate_interval])) or vector(0))" }
           ]
         },
         {
@@ -69,7 +69,7 @@ data:
               { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\\\b(error|exception|fatal|panic)\\\\b` [$__rate_interval]))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])) or vector(0))" }
           ]
         },
         {
@@ -90,9 +90,9 @@ data:
           "fieldConfig": { "defaults": { "unit": "logs" } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "all",
-              "expr": "sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} [$__rate_interval]))" },
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} [$__rate_interval])) or vector(0))" },
             { "refId": "B", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "errors",
-              "expr": "sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\\\b(error|exception|fatal|panic)\\\\b` [$__rate_interval]))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])) or vector(0))" }
           ]
         },
         {
