@@ -62,7 +62,7 @@ data:
             "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__rate_interval])) or vector(0))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__interval])) or vector(0))" }
           ]
         },
         {
@@ -74,7 +74,7 @@ data:
               { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])) or vector(0))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])) or vector(0))" }
           ]
         },
         {
@@ -85,7 +85,7 @@ data:
             "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "(count(count by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__rate_interval]))) or vector(0))" }
+              "expr": "(count(count by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__interval]))) or vector(0))" }
           ]
         },
         {
@@ -97,7 +97,7 @@ data:
               { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "(count(count by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval]))) or vector(0))" }
+              "expr": "(count(count by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval]))) or vector(0))" }
           ]
         },
         {
@@ -108,7 +108,7 @@ data:
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
               "legendFormat": "{{detected_level}}",
-              "expr": "sum by (detected_level) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__rate_interval]))" }
+              "expr": "sum by (detected_level) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__interval]))" }
           ]
         },
         {
@@ -118,9 +118,9 @@ data:
           "fieldConfig": { "defaults": { "unit": "logs" } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "all",
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__rate_interval])) or vector(0))" },
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__interval])) or vector(0))" },
             { "refId": "B", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "errors",
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])) or vector(0))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])) or vector(0))" }
           ]
         },
         {
@@ -131,7 +131,7 @@ data:
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
               "legendFormat": "{{service_name}}",
-              "expr": "topk(12, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__rate_interval])))" }
+              "expr": "topk(12, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} [$__interval])))" }
           ]
         },
         {
@@ -142,7 +142,7 @@ data:
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
               "legendFormat": "{{service_name}}",
-              "expr": "topk(12, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])))" }
+              "expr": "topk(12, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])))" }
           ]
         },
         {
@@ -152,7 +152,7 @@ data:
           "options": { "sortBy": [ { "displayName": "Errors/s", "desc": true } ] },
           "targets": [
             { "refId": "A", "instant": true, "queryType": "instant", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "topk(30, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__rate_interval])))" }
+              "expr": "topk(30, sum by (service_name) (rate({service_namespace=\"bankobs\", service_name=~\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])))" }
           ],
           "transformations": [
             { "id": "organize", "options": { "excludeByName": { "Time": true },

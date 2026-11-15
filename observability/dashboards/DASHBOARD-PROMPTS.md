@@ -86,7 +86,12 @@ LOKI FACTS
 - Log level is NOT a label selector. Group by detected_level; match errors with a LINE FILTER:
   |~ `(?i)\b(error|exception|fatal|panic)\b`
 - Service dropdown variable: label_values({service_namespace="bankobs"}, service_name)
-- Rates use [$__rate_interval]; a "request rate" proxy for bankobs is log-line rate.
+- LOKI RANGE INTERVAL — use `[$__interval]`, NOT `[$__rate_interval]`. `$__rate_interval` depends on a
+  scrape interval, which the Loki datasource does NOT have, so Grafana (v13.3.0 here) leaves it literal
+  and Loki throws `parse error ... not a valid duration string: "$__rate_interval"` — EVERY Loki rate
+  panel errors ("No data" + red ⚠). This is why a logs+traces board can look "completely broken" while a
+  spanmetrics (Prometheus) board is fine — Prometheus interpolates `$__rate_interval`, Loki doesn't.
+- A "request rate" proxy for bankobs is log-line rate.
 - EMPTY-STATE FIX (spanmetrics error rate): `calls_total` only ever carries status_code=STATUS_CODE_UNSET
   until a real error occurs — there is NO STATUS_CODE_ERROR series in a healthy system. So a naive
   `sum(rate(...status_code="STATUS_CODE_ERROR"...))` is EMPTY and the panel renders "No data", not 0%.
