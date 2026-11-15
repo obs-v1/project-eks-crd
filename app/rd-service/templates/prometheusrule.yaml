@@ -3,7 +3,7 @@
 {{- $svc := .Chart.Name }}
 # WHAT to alert on for {{ $svc }} — scoped to this one service. RED (error rate + p95 latency)
 # from the spanmetrics connector; pod/deployment health from kubeletstats + k8s_cluster. WHO is
-# paged is the central AlertmanagerConfig, which routes on the app/team/severity labels here.
+# paged for these alerts is this service's OWN AlertmanagerConfig (templates/alertmanagerconfig.yaml).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

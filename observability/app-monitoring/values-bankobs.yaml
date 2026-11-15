@@ -1,31 +1,15 @@
-# BankObs alerting — the ROUTING half ("who is paged"). Deploy:
-#   helm upgrade --install bankobs-monitoring ./app-monitoring -n monitoring -f app-monitoring/values-bankobs.yaml
-# (or `make app-monitoring`, which also applies every service's own rules — see below).
+# BankObs — OPTIONAL SES pipeline smoke-test. Deploy:
+#   make app-monitoring         # applies every service's OWN rules + routing (the real alerting)
+#   make pipeline-test          # fire this probe once to confirm SES delivery, then:
+#   make pipeline-test-off
 #
-# WHAT to alert on now lives per-service: each app/<svc> chart carries its own
-# app/<svc>/templates/prometheusrule.yaml (RED + pod/deploy health, scoped to that one
-# service_name), applied to this obs cluster by the `make app-monitoring` loop. This file no
-# longer lists any `alerts:` — it only declares the teams and the routes those per-service
-# alerts reach, plus the optional end-to-end pipeline probe.
+# Routing (who is paged) now lives per-service: each app/<svc> chart carries both its
+# PrometheusRule (what to alert on) and its AlertmanagerConfig (who to e-mail), from that
+# service's values.yaml `monitoring:` block. This file only aims the end-to-end probe e-mail.
 
 app:
   name: bankobs
   namespace: monitoring      # CRs live where Prometheus/Alertmanager run (the obs cluster)
 
-teams:
-  # Infra/SRE — owns pod health, restarts, capacity (every service's DeploymentDegraded /
-  # PodNotRunning / ContainerRestarting rules route here).
-  - name: platform
-    emails: ["platform-sre@example.com"]
-  # Payments squad — owns the transaction path's RED signals; critical pages a pager inbox.
-  # (The payments-domain services stamp team=payments on their HighErrorRate/HighLatencyP95.)
-  - name: payments
-    emails: ["payments-eng@example.com"]
-    criticalEmails: ["payments-oncall@example.com"]
-
-defaultTeam: platform
-
-# Flip to true (or `--set enableTestAlert=true`) to render an always-firing probe alert and
-# send yourself a test e-mail through the whole pipeline, then turn off. This is the ONLY rule
-# this central chart renders; the real per-service rules come from the app/<svc> charts.
-enableTestAlert: false
+enableTestAlert: false       # `make pipeline-test` sets this true, `pipeline-test-off` resets it
+testEmail: "platform-sre@example.com"

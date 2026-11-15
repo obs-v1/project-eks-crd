@@ -35,7 +35,7 @@ HN = -n $(NS)
 
 AGENT_CTX ?= obs-v1-bankobs   # the agent runs IN the bankobs cluster
 
-.PHONY: repos ensure-context namespace all otel-collector kube-prometheus-stack loki jaeger pyroscope pyrra ingress collector-lb dashboards agent obs-agent alertmanager-secret app-monitoring destroy
+.PHONY: repos ensure-context namespace all otel-collector kube-prometheus-stack loki jaeger pyroscope pyrra ingress collector-lb dashboards agent obs-agent alertmanager-secret app-monitoring pipeline-test pipeline-test-off destroy
 
 # OTel collectors in the BANKOBS cluster (metrics + logs, forwarded by OTLP across the peering):
 #   bankobs-agent   (DaemonSet)  hostmetrics + kubeletstats + app /metrics scrape + log tail
@@ -96,26 +96,36 @@ alertmanager-secret: namespace
 	   --dry-run=client -o yaml | $(K) apply -f - >/dev/null
 	@echo "  ✓ secret alertmanager-ses-smtp present (mounted into Alertmanager)."
 
-# CRD alerting, in two halves:
-#   1. ROUTING (who is paged) — the central app-monitoring chart renders ONE AlertmanagerConfig
-#      (bankobs-routing) merged into the base SES config. `--set enableTestAlert=true` also adds a
-#      pipeline probe. Add another app: write app-monitoring/values-<app>.yaml + a second release.
-#   2. RULES (what to alert on) — each service OWNS its rules in app/<svc>/templates/prometheusrule.yaml
-#      (RED + pod/deploy health, scoped to that service_name). They are disabled in the normal app
-#      release (that lands on the bankobs cluster, which has no PrometheusRule CRD); here we render
-#      each with monitoring.enabled=true and apply it to THIS (obs) cluster, where the operator lives.
+# CRD alerting — each service owns BOTH halves in its own chart:
+#   • RULES (what to alert on)   — app/<svc>/templates/prometheusrule.yaml     → <svc>-alerts
+#   • ROUTING (who is paged)     — app/<svc>/templates/alertmanagerconfig.yaml → <svc>-routing
+#     (its own emails/criticalEmails, from that service's values.yaml monitoring: block)
+# Both are disabled in the normal app release (that lands on the bankobs cluster, which has no
+# PrometheusRule/AlertmanagerConfig CRD); here we render each with monitoring.enabled=true and
+# apply it to THIS (obs) cluster, where the operator lives. The only central piece is the SES
+# transport in the kps values. The optional SES smoke-test is `make pipeline-test` (below).
 APP_DIR ?= ../app
 app-monitoring: namespace
-	$(H) bankobs-monitoring ./app-monitoring $(HN) -f app-monitoring/values-bankobs.yaml
-	@echo "  → applying each service's own PrometheusRule (from $(APP_DIR)/*/) to $(CONTEXT)…"
+	@echo "  → applying each service's own PrometheusRule + AlertmanagerConfig (from $(APP_DIR)/*/) to $(CONTEXT)…"
 	@n=0; for d in $(APP_DIR)/*/ ; do \
 	  svc=$$(basename $$d); \
 	  [ -f "$$d/templates/prometheusrule.yaml" ] || continue; \
-	  helm template $$svc $$d --show-only templates/prometheusrule.yaml \
+	  helm template $$svc $$d -s templates/prometheusrule.yaml -s templates/alertmanagerconfig.yaml \
 	    --set monitoring.enabled=true --set monitoring.namespace=$(NS) 2>/dev/null \
-	    | $(K) apply -f - >/dev/null && n=$$((n+1)) || echo "    ⚠ $$svc rule skipped"; \
+	    | $(K) apply -f - >/dev/null && n=$$((n+1)) || echo "    ⚠ $$svc skipped"; \
 	done; \
-	echo "  ✓ alerting applied: central AlertmanagerConfig bankobs-routing + $$n per-service <svc>-alerts PrometheusRules."
+	echo "  ✓ per-service alerting applied: $$n × (PrometheusRule <svc>-alerts + AlertmanagerConfig <svc>-routing)."
+	@echo "  ℹ optional SES end-to-end check: 'make pipeline-test' then 'make pipeline-test-off'."
+
+# Optional end-to-end SES smoke-test: an always-firing probe + its own route to
+# app-monitoring/values-bankobs.yaml:testEmail. Fire it, confirm the e-mail, then turn it off.
+# It does NOT route any real alert — that is each service's own AlertmanagerConfig.
+pipeline-test: namespace
+	$(H) bankobs-monitoring ./app-monitoring $(HN) -f app-monitoring/values-bankobs.yaml --set enableTestAlert=true
+	@echo "  ✓ probe armed — within ~1 min bankobsAlertPipelineTest fires → SES e-mails testEmail. Turn off with 'make pipeline-test-off'."
+pipeline-test-off: namespace
+	$(H) bankobs-monitoring ./app-monitoring $(HN) -f app-monitoring/values-bankobs.yaml --set enableTestAlert=false
+	@echo "  ✓ probe disarmed."
 
 # BankObs dashboards: ConfigMaps (label grafana_dashboard=1) that the kps Grafana sidecar
 # auto-loads into the "BankObs" folder. kubectl reads only *.yaml/*.yml/*.json from the dir,
@@ -157,6 +167,7 @@ ingress: namespace
 destroy:
 	-helm --kube-context $(CONTEXT) uninstall bankobs-monitoring $(HN)
 	-$(K) delete prometheusrule -l app.kubernetes.io/managed-by=app-monitoring $(HN) --ignore-not-found
+	-$(K) delete alertmanagerconfig -l app.kubernetes.io/managed-by=app-monitoring $(HN) --ignore-not-found
 	-$(K) delete -f pyrra/slo.yaml --ignore-not-found
 	-$(K) delete -f pyrra/pyrra.yaml --ignore-not-found
 	-helm --kube-context $(CONTEXT) uninstall obs-agent obs-cluster $(HN)

@@ -1,0 +1,51 @@
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ $svc }}-routing
+  namespace: {{ $m.namespace }}
+  labels:
+    alertmanagerConfig: app-monitoring
+    app.kubernetes.io/managed-by: app-monitoring
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  route:
+    # Every alert for this service lands on its own e-mail receiver by default.
+    receiver: {{ $svc }}-email
+    groupBy: ["alertname", "app", "service", "severity"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    matchers:
+      - name: service
+        value: {{ $svc | quote }}
+        matchType: "="
+  {{- if $m.criticalEmails }}
+    routes:
+      # severity=critical peels off to the pager list and does NOT also hit the default.
+      - receiver: {{ $svc }}-critical
+        matchers:
+          - name: severity
+            value: "critical"
+            matchType: "="
+        continue: false
+  {{- end }}
+  receivers:
+    - name: {{ $svc }}-email
+      emailConfigs:
+  {{- range $m.emails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+  {{- end }}
+  {{- if $m.criticalEmails }}
+    - name: {{ $svc }}-critical
+      emailConfigs:
+    {{- range $m.criticalEmails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+    {{- end }}
+  {{- end }}
+{{- end }}

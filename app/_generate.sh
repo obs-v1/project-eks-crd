@@ -3,12 +3,16 @@
 #   <svc>/{Chart.yaml, values.yaml, Dockerfile, Makefile,
 #          templates/{deployment,service,prometheusrule}.yaml}
 #
-# Each chart owns its OWN alerting: templates/prometheusrule.yaml renders a per-service
-# PrometheusRule (RED + pod/deploy health, scoped to that one service_name). It is gated by
-# monitoring.enabled (default false) because the CRD + Prometheus Operator live on the OBS
-# cluster, not the bankobs cluster this chart deploys to — the obs `make app-monitoring` loop
-# renders it with monitoring.enabled=true and applies it to the obs cluster. Routing (who is
-# paged) stays in the one central app-monitoring AlertmanagerConfig.
+# Each chart owns its OWN alerting, end to end: templates/prometheusrule.yaml renders a
+# per-service PrometheusRule (RED + pod/deploy health, scoped to that one service_name) AND
+# templates/alertmanagerconfig.yaml renders a per-service AlertmanagerConfig (WHO is paged for
+# this service — its own e-mail recipients). Alerting is MANDATORY: monitoring.enabled defaults
+# to TRUE, so every service renders its alerting CRs unless a deploy deliberately opts out. The
+# CRDs + Prometheus Operator live on the OBS cluster, so the obs `make app-monitoring` loop
+# applies them there; the app release to the BANKOBS cluster (app/Makefile + each svc's own
+# `deploy`) is the one explicit opt-out (--set monitoring.enabled=false), because that cluster
+# has no PrometheusRule/AlertmanagerConfig CRD. The only central piece left is the SES transport
+# (smarthost/auth/From) in the kube-prometheus-stack values.
 #
 # There is NO service source here. The Dockerfile is a passthrough `FROM` the published
 # image, so a student can rebuild, push to THEIR OWN registry and run their own CI/CD —
@@ -88,9 +92,15 @@ gen() {
   mkdir -p "$svc/templates"
 
   # RED alerts for a service page the team that owns it. The payments domain is the
-  # transaction path (its own on-call); everything else rolls up to platform/SRE.
-  local team=platform
-  [ "$domain" = "payments" ] && team=payments
+  # transaction path (its own on-call); everything else rolls up to platform/SRE. The team
+  # name is kept only as a label for grouping/filtering; the actual e-mail recipients are set
+  # below and rendered into THIS service's own AlertmanagerConfig.
+  local team=platform emails='["platform-sre@example.com"]' critical='[]'
+  if [ "$domain" = "payments" ]; then
+    team=payments
+    emails='["payments-eng@example.com"]'
+    critical='["payments-oncall@example.com"]'
+  fi
 
   cat > "$svc/Chart.yaml" <<EOF
 apiVersion: v2
@@ -117,22 +127,28 @@ resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 500m, memory: 512Mi }
 
-# ── This service's OWN alerting (rendered by templates/prometheusrule.yaml) ──────────────
-# enabled is false here on purpose: the normal app release goes to the bankobs cluster, but
-# the PrometheusRule CRD + Prometheus Operator live on the OBS cluster. The observability
-# \`make app-monitoring\` loop renders this with --set monitoring.enabled=true and applies it
-# to the obs cluster. Routing (who is paged) is the central app-monitoring AlertmanagerConfig,
-# which matches on app=bankobs plus the team/severity labels stamped on each rule below.
+# ── This service's OWN alerting (prometheusrule.yaml + alertmanagerconfig.yaml) ───────────
+# enabled defaults to TRUE: alerting is MANDATORY — every service renders its PrometheusRule +
+# AlertmanagerConfig. The PrometheusRule / AlertmanagerConfig CRDs + Prometheus Operator live on
+# the OBS cluster, so the observability \`make app-monitoring\` loop applies them there. The one
+# explicit opt-out is the app release to the BANKOBS cluster (app/Makefile + this chart's own
+# \`make deploy\`), which passes --set monitoring.enabled=false because that cluster has no such
+# CRD. This service owns BOTH what it alerts on AND who is paged; only the SES transport
+# (smarthost/auth/From) is central (kps values).
 monitoring:
-  enabled: false
-  app: bankobs                 # umbrella label the central AlertmanagerConfig routes on
+  enabled: true                # MANDATORY by default; only the bankobs app release opts out
+  app: bankobs                 # umbrella label stamped on every alert (grouping / filtering)
   namespace: monitoring        # where Prometheus/Alertmanager watch (obs cluster)
   cluster: obs-v1-bankobs      # k8s_cluster_name stamped on this service's infra metrics
   serviceNamespace: bankobs    # service_namespace (spanmetrics) + k8s_namespace_name (infra)
-  team: $team                  # RED alerts (error rate / latency) page this team
-  infraTeam: platform          # pod / deployment health pages SRE
+  team: $team                  # label on RED alerts (grouping / filtering only)
+  infraTeam: platform          # label on pod / deployment-health alerts
   errorRateThreshold: 0.05     # HighErrorRate fires above this 5m error ratio
   latencyP95Ms: 1500           # HighLatencyP95 fires above this p95, in ms
+  # WHO is paged for this service → rendered into its own AlertmanagerConfig. The SES
+  # transport (smarthost/auth/From) is global (kps values); only the recipients live here.
+  emails: $emails              # every alert for this service e-mails here
+  criticalEmails: $critical    # severity=critical e-mails here instead (pager); [] → use emails
 EOF
 
   cat > "$svc/Dockerfile" <<EOF
@@ -222,7 +238,7 @@ EOF
 {{- $svc := .Chart.Name }}
 # WHAT to alert on for {{ $svc }} — scoped to this one service. RED (error rate + p95 latency)
 # from the spanmetrics connector; pod/deployment health from kubeletstats + k8s_cluster. WHO is
-# paged is the central AlertmanagerConfig, which routes on the app/team/severity labels here.
+# paged for these alerts is this service's OWN AlertmanagerConfig (templates/alertmanagerconfig.yaml).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -285,6 +301,67 @@ spec:
 {{- end }}
 EOF
 
+  # Per-service routing CRD — WHO is paged for THIS service. Gated by monitoring.enabled (same
+  # reason as the rule: the CRD + operator live on the obs cluster, not here). It carries the
+  # selector label alertmanagerConfig=app-monitoring so the Alertmanager CR merges it into the
+  # live config. It matches only this service's alerts (service=<svc>); when criticalEmails is
+  # set, severity=critical peels off to the pager list (everything else → emails). The SES
+  # transport (smarthost/auth/From) is inherited from the global kps Alertmanager config, so
+  # only the recipients appear here.
+  cat > "$svc/templates/alertmanagerconfig.yaml" <<'EOF'
+{{- if .Values.monitoring.enabled }}
+{{- $m := .Values.monitoring }}
+{{- $svc := .Chart.Name }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ $svc }}-routing
+  namespace: {{ $m.namespace }}
+  labels:
+    alertmanagerConfig: app-monitoring
+    app.kubernetes.io/managed-by: app-monitoring
+    app: {{ $m.app }}
+    service: {{ $svc }}
+spec:
+  route:
+    # Every alert for this service lands on its own e-mail receiver by default.
+    receiver: {{ $svc }}-email
+    groupBy: ["alertname", "app", "service", "severity"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    matchers:
+      - name: service
+        value: {{ $svc | quote }}
+        matchType: "="
+  {{- if $m.criticalEmails }}
+    routes:
+      # severity=critical peels off to the pager list and does NOT also hit the default.
+      - receiver: {{ $svc }}-critical
+        matchers:
+          - name: severity
+            value: "critical"
+            matchType: "="
+        continue: false
+  {{- end }}
+  receivers:
+    - name: {{ $svc }}-email
+      emailConfigs:
+  {{- range $m.emails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+  {{- end }}
+  {{- if $m.criticalEmails }}
+    - name: {{ $svc }}-critical
+      emailConfigs:
+    {{- range $m.criticalEmails }}
+        - to: {{ . | quote }}
+          sendResolved: true
+    {{- end }}
+  {{- end }}
+{{- end }}
+EOF
+
   {
     printf 'SVC := %s\n' "$svc"
     printf 'ECR ?= %s\n' "$REGISTRY_DEFAULT"
@@ -294,7 +371,10 @@ EOF
     printf '.PHONY: build push deploy undeploy\n\n'
     printf 'build:\n\tdocker build -t $(ECR)/$(SVC):$(TAG) .\n\n'
     printf 'push:\n\tdocker push $(ECR)/$(SVC):$(TAG)\n\n'
-    printf 'deploy:\n\thelm --kube-context $(CTX) upgrade --install $(SVC) . -n $(NS) --create-namespace --set image.registry=$(ECR) --set image.tag=$(TAG)\n\n'
+    printf '# monitoring.enabled is ON by default (alerting is mandatory); the bankobs cluster has no\n'
+    printf '# PrometheusRule/AlertmanagerConfig CRD, so the deploy here opts out. The alerting CRs are\n'
+    printf '# applied to the obs cluster by: make -C ../../observability app-monitoring\n'
+    printf 'deploy:\n\thelm --kube-context $(CTX) upgrade --install $(SVC) . -n $(NS) --create-namespace --set image.registry=$(ECR) --set image.tag=$(TAG) --set monitoring.enabled=false\n\n'
     printf 'undeploy:\n\thelm --kube-context $(CTX) uninstall $(SVC) -n $(NS)\n'
   } > "$svc/Makefile"
 }

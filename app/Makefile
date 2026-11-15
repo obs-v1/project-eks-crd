@@ -73,13 +73,16 @@ platform: namespace license configmaps
 	$(K) apply -n $(NS) -f platform/
 
 # Fire each chart in sequence; do NOT wait for pods (helm returns once resources are applied).
+# monitoring.enabled is ON by default so alerting is mandatory, but this (bankobs) cluster has no
+# PrometheusRule/AlertmanagerConfig CRD — so the app release here EXPLICITLY opts out. The alerting
+# CRs are applied to the OBS cluster instead by `make -C ../observability app-monitoring`.
 services: namespace
 	@for s in $(SERVICES); do \
 	  echo "  → $$s"; \
 	  helm --kube-context $(CTX) upgrade --install $$s ./$$s -n $(NS) \
-	    --set image.registry=$(ECR) --set image.tag=$(TAG) >/dev/null || exit 1; \
+	    --set image.registry=$(ECR) --set image.tag=$(TAG) --set monitoring.enabled=false >/dev/null || exit 1; \
 	done
-	@echo "  ✓ $(words $(SERVICES)) service charts applied."
+	@echo "  ✓ $(words $(SERVICES)) service charts applied (alerting CRs deferred to the obs cluster)."
 
 frontend:
 	@test -n "$(DOMAIN)" || { echo "ERROR: set DOMAIN=lab.example.com"; exit 1; }

@@ -1,10 +1,9 @@
-{{- include "app-monitoring.validate" . -}}
 {{- if .Values.enableTestAlert }}
 # Optional pipeline probe ONLY. The real alert rules live per-service in each app/<svc> chart
 # (app/<svc>/templates/prometheusrule.yaml), applied to this cluster by `make app-monitoring`.
 # This always-firing rule exists just to prove PrometheusRule → Alertmanager → SES end to end;
 # it is rendered only when enableTestAlert=true. Prometheus discovers it from any namespace
-# (ruleSelectorNilUsesHelmValues:false); the AlertmanagerConfig below routes it by its labels.
+# (ruleSelectorNilUsesHelmValues:false); the AlertmanagerConfig beside it routes it by alertname.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -21,7 +20,6 @@ spec:
           expr: "vector(1)"
           labels:
             severity: "info"
-            team: {{ .Values.defaultTeam | quote }}
             app: {{ .Values.app.name | quote }}
           annotations:
             summary: "Alert pipeline test for {{ .Values.app.name }}"

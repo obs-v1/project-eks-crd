@@ -1,36 +1,28 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  app-monitoring — the ROUTING half of CRD alerting. Copy this to values-<app>.yaml
-#  and deploy with:
-#    helm upgrade --install <app>-monitoring ./app-monitoring -n monitoring -f values-<app>.yaml
+#  app-monitoring — OPTIONAL SES pipeline smoke-test ONLY.
 #
-#  This chart renders the AlertmanagerConfig (WHO is paged: team → e-mail routes) and, when
-#  enableTestAlert=true, a single always-firing pipeline probe. It does NOT define the real
-#  alert rules — WHAT to alert on lives per-service in each app/<svc> chart
-#  (app/<svc>/templates/prometheusrule.yaml). Nothing here changes metric COLLECTION (OTel-only);
-#  the SES transport lives centrally in the kps values.
+#  Routing (WHO is paged) now lives PER-SERVICE: each app/<svc> chart renders its own
+#  AlertmanagerConfig from its values.yaml `monitoring.emails` / `monitoring.criticalEmails`.
+#  This chart no longer routes any real alert. It exists solely to prove the pipeline
+#  (PrometheusRule → Prometheus → Alertmanager → SES) end to end.
+#
+#  Deploy the probe, confirm the e-mail arrives, then turn it off:
+#    make -C .. pipeline-test        # enableTestAlert=true
+#    make -C .. pipeline-test-off    # enableTestAlert=false
 # ─────────────────────────────────────────────────────────────────────────────
 
 app:
-  # Logical application name. Used as the `app` label the routing matches on, and to name the
-  # generated AlertmanagerConfig. Every per-service rule stamps this same label (app=<name>).
+  # Logical application name — names the probe rule/route and stamps the app label.
   name: example
-  # Namespace the CRs are created in. Must be a namespace Alertmanager/Prometheus watch
-  # (here: monitoring, on the observability cluster). NOT the app's own namespace.
+  # Namespace the CRs are created in. Must be one Alertmanager/Prometheus watch
+  # (here: monitoring, on the observability cluster).
   namespace: monitoring
 
-# Teams that receive alerts. Each per-service rule names a `team`; its alerts route to that
-# team's `emails`. If a team sets `criticalEmails`, alerts with severity=critical go there.
-teams:
-  - name: platform
-    emails: ["platform@example.com"]
-  # - name: payments
-  #   emails: ["payments@example.com"]
-  #   criticalEmails: ["payments-pager@example.com"]
-
-# Team used for routing fallback / the pipeline probe (must be one of the names above).
-defaultTeam: platform
-
-# Set true to render an always-firing probe alert (severity=info) — handy to prove the
-# PrometheusRule → Prometheus → Alertmanager → e-mail path end to end, then turn back off.
-# This is the ONLY rule this chart renders; real alerts come from the app/<svc> charts.
+# Set true (or `--set enableTestAlert=true`) to render an always-firing probe alert plus a
+# self-contained route that e-mails `testEmail`. This is the ONLY thing this chart renders;
+# real per-service alerts + routing come from the app/<svc> charts. Turn it back off after.
 enableTestAlert: false
+
+# Where the probe e-mail goes when enableTestAlert=true. The SES transport (smarthost/auth/
+# From) is inherited from the global kps Alertmanager config.
+testEmail: "platform-sre@example.com"

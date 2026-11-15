@@ -13,22 +13,28 @@ resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 500m, memory: 512Mi }
 
-# ── This service's OWN alerting (rendered by templates/prometheusrule.yaml) ──────────────
-# enabled is false here on purpose: the normal app release goes to the bankobs cluster, but
-# the PrometheusRule CRD + Prometheus Operator live on the OBS cluster. The observability
-# `make app-monitoring` loop renders this with --set monitoring.enabled=true and applies it
-# to the obs cluster. Routing (who is paged) is the central app-monitoring AlertmanagerConfig,
-# which matches on app=bankobs plus the team/severity labels stamped on each rule below.
+# ── This service's OWN alerting (prometheusrule.yaml + alertmanagerconfig.yaml) ───────────
+# enabled defaults to TRUE: alerting is MANDATORY — every service renders its PrometheusRule +
+# AlertmanagerConfig. The PrometheusRule / AlertmanagerConfig CRDs + Prometheus Operator live on
+# the OBS cluster, so the observability `make app-monitoring` loop applies them there. The one
+# explicit opt-out is the app release to the BANKOBS cluster (app/Makefile + this chart's own
+# `make deploy`), which passes --set monitoring.enabled=false because that cluster has no such
+# CRD. This service owns BOTH what it alerts on AND who is paged; only the SES transport
+# (smarthost/auth/From) is central (kps values).
 monitoring:
-  enabled: false
-  app: bankobs                 # umbrella label the central AlertmanagerConfig routes on
+  enabled: true                # MANDATORY by default; only the bankobs app release opts out
+  app: bankobs                 # umbrella label stamped on every alert (grouping / filtering)
   namespace: monitoring        # where Prometheus/Alertmanager watch (obs cluster)
   cluster: obs-v1-bankobs      # k8s_cluster_name stamped on this service's infra metrics
   serviceNamespace: bankobs    # service_namespace (spanmetrics) + k8s_namespace_name (infra)
-  team: platform                  # RED alerts (error rate / latency) page this team
-  infraTeam: platform          # pod / deployment health pages SRE
+  team: platform                  # label on RED alerts (grouping / filtering only)
+  infraTeam: platform          # label on pod / deployment-health alerts
   errorRateThreshold: 0.05     # HighErrorRate fires above this 5m error ratio
   latencyP95Ms: 1500           # HighLatencyP95 fires above this p95, in ms
+  # WHO is paged for this service → rendered into its own AlertmanagerConfig. The SES
+  # transport (smarthost/auth/From) is global (kps values); only the recipients live here.
+  emails: ["platform-sre@example.com"]              # every alert for this service e-mails here
+  criticalEmails: []    # severity=critical e-mails here instead (pager); [] → use emails
 
 # Image-defect workaround (see _generate.sh): the published image's logback-spring.xml fails to parse
 # and crash-loops the pod; mount a corrected copy at /config and point the JVM at it.
