@@ -92,6 +92,12 @@ LOKI FACTS
   panel errors ("No data" + red ⚠). This is why a logs+traces board can look "completely broken" while a
   spanmetrics (Prometheus) board is fine — Prometheus interpolates `$__rate_interval`, Loki doesn't.
 - A "request rate" proxy for bankobs is log-line rate.
+- LOKI PERF — detect errors with the `detected_level` structured-metadata label, NOT a line-content
+  regex. Measured on this stack (1h, all services, ~2.4GB/2.6M lines): `|~ (?i)error|...` error panels
+  took ~40s each; the same via `| detected_level=~"error|critical|fatal"` took ~5s (7-8x faster, and
+  it's the more correct signal — the parsed level, not any line mentioning "error"). Nested
+  `count(count by (service_name)(rate(... regex ...)))` panels were the worst (~40s). Also keep the
+  board's default range modest (now-30m, not now-1h) — every Loki rate panel scans the whole range.
 - EMPTY-STATE FIX (spanmetrics error rate): `calls_total` only ever carries status_code=STATUS_CODE_UNSET
   until a real error occurs — there is NO STATUS_CODE_ERROR series in a healthy system. So a naive
   `sum(rate(...status_code="STATUS_CODE_ERROR"...))` is EMPTY and the panel renders "No data", not 0%.

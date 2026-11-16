@@ -29,7 +29,7 @@ data:
       "timezone": "browser",
       "schemaVersion": 39,
       "refresh": "30s",
-      "time": { "from": "now-1h", "to": "now" },
+      "time": { "from": "now-30m", "to": "now" },
       "templating": {
         "list": [
           {
@@ -69,7 +69,7 @@ data:
               { "color": "green", "value": null }, { "color": "red", "value": 0.1 } ] } } },
           "targets": [
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" },
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])) or vector(0))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} | detected_level=~`error|critical|fatal` [$__interval])) or vector(0))" }
           ]
         },
         {
@@ -92,7 +92,7 @@ data:
             { "refId": "A", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "all",
               "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} [$__interval])) or vector(0))" },
             { "refId": "B", "datasource": { "type": "loki", "uid": "${ds_loki}" }, "legendFormat": "errors",
-              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} |~ `(?i)\\b(error|exception|fatal|panic)\\b` [$__interval])) or vector(0))" }
+              "expr": "(sum(rate({service_namespace=\"bankobs\", service_name=\"$service\"} | detected_level=~`error|critical|fatal` [$__interval])) or vector(0))" }
           ]
         },
         {
