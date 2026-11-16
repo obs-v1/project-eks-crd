@@ -67,7 +67,7 @@ spec:
         - alert: {{ $svc }}DeploymentDown
           expr: >-
             absent(k8s_pod_phase{k8s_pod_name=~"upi-service.*"}) == 1
-          for: 5m
+          for: 1m
           labels: { severity: "critical", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
           annotations:
             summary: "{{ $svc }} has pod(s) not in Running state"
