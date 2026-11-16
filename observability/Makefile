@@ -105,9 +105,17 @@ alertmanager-secret: namespace
 # apply it to THIS (obs) cluster, where the operator lives. The only central piece is the SES
 # transport in the kps values. The optional SES smoke-test is `make pipeline-test` (below).
 APP_DIR ?= ../app
+# Optionally scope to ONE chart for a fast dev loop:  make app-monitoring SVC=upi-service
 app-monitoring: namespace
-	@echo "  → applying each service's own PrometheusRule + AlertmanagerConfig (from $(APP_DIR)/*/) to $(CONTEXT)…"
-	@n=0; for d in $(APP_DIR)/*/ ; do \
+	@dirs="$(APP_DIR)/*/"; \
+	if [ -n "$(SVC)" ]; then \
+	  [ -d "$(APP_DIR)/$(SVC)" ] || { echo "  ✗ no such service chart: $(APP_DIR)/$(SVC)"; exit 1; }; \
+	  dirs="$(APP_DIR)/$(SVC)/"; \
+	  echo "  → applying $(SVC) PrometheusRule + AlertmanagerConfig to $(CONTEXT)…"; \
+	else \
+	  echo "  → applying each service's own PrometheusRule + AlertmanagerConfig (from $(APP_DIR)/*/) to $(CONTEXT)…"; \
+	fi; \
+	n=0; for d in $$dirs ; do \
 	  svc=$$(basename $$d); \
 	  [ -f "$$d/templates/prometheusrule.yaml" ] || continue; \
 	  helm template $$svc $$d -s templates/prometheusrule.yaml -s templates/alertmanagerconfig.yaml \
