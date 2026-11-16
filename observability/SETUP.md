@@ -188,12 +188,36 @@ transport** (the central "how e-mail is sent"; per-service routing is added in S
 make kube-prometheus-stack
 ```
 
-Expands to:
+**To enable Alertmanager e-mail**, pass the SES settings on the same command. The **password** lives
+in the `alertmanager-ses-smtp` secret (Step 3b); the **username** and **From** are injected here via
+`--set-string`, so they stay out of git:
+
+```bash
+make kube-prometheus-stack \
+  SES_SMTP_USERNAME='<ses-user>' SES_SMTP_PASSWORD='<ses-pass>' SES_FROM='alerts@your-domain'
+```
+
+| Variable | Where it goes | If unset |
+|---|---|---|
+| `SES_SMTP_PASSWORD` | Secret `alertmanager-ses-smtp` (key `smtp_password`), mounted into Alertmanager | placeholder stored → e-mail won't authenticate |
+| `SES_SMTP_USERNAME` | `--set-string alertmanager.config.global.smtp_auth_username` | `values.yaml` placeholder kept → won't authenticate |
+| `SES_FROM` | `--set-string alertmanager.config.global.smtp_from` | `values.yaml` default From address kept |
+
+> ⚠ **Re-run caveat:** this target depends on `alertmanager-secret`, so it rewrites the SES secret on
+> every run. If you re-run it **without** `SES_SMTP_PASSWORD`, the stored password is overwritten with
+> the placeholder and delivery stops. Always pass `SES_SMTP_PASSWORD` when re-running kps (or re-run
+> `make alertmanager-secret SES_SMTP_PASSWORD=…` afterwards). Full SES setup (verified identity,
+> sandbox) is in **[ALERTING-CRD.md](ALERTING-CRD.md)**.
+
+Expands to (with the SES vars set, `$(SES_SET)` adds the two `--set-string` overrides):
 
 ```bash
 helm --kube-context obs-v1-observability upgrade --install kps \
   prometheus-community/kube-prometheus-stack --version 92.17.0 \
-  -n monitoring -f values/kube-prometheus-stack.yaml --wait --timeout 15m
+  -n monitoring -f values/kube-prometheus-stack.yaml \
+  --set-string alertmanager.config.global.smtp_auth_username=<ses-user> \
+  --set-string alertmanager.config.global.smtp_from=alerts@your-domain \
+  --wait --timeout 15m
 ```
 
 **What the values do (highlights):**
@@ -204,6 +228,9 @@ helm --kube-context obs-v1-observability upgrade --install kps \
 - Grafana ships four datasources already wired together: **Prometheus** (with exemplars → Jaeger),
   **Loki** (derived `trace_id` → Jaeger), **Jaeger** (`tracesToLogsV2` → Loki, `tracesToProfiles`
   → Pyroscope), and **Pyroscope**.
+- **Alertmanager** is pre-configured with the SES SMTP transport (smarthost + STARTTLS + From + a null
+  catch-all): password from the mounted `alertmanager-ses-smtp` secret, username/From from the
+  `--set-string` overrides above. Per-service routing is grafted on in Step 14.
 
 **Verify:**
 
