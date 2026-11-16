@@ -60,7 +60,7 @@ scrapers are **disabled** — see `values/kube-prometheus-stack.yaml`.
 | 0 | Prerequisites | *(cluster, already up)* | — | kubectl contexts + Traefik + external-dns must exist |
 | 1 | Helm repos | — | — | register the chart sources |
 | 2 | Namespace | `monitoring` | — | everything lives here |
-| 3 ⟶ | *prereq:* SES secret | `alertmanager-ses-smtp` | — | SES SMTP password for Alertmanager — must exist **before** kps (operator mounts it); **auto-created by the kps target** |
+| 3 ⟶ | *prereq:* SES secret | `alertmanager-ses-smtp` | — | one Secret holds all SES settings (`smtp_auth_username` / `smtp_password` / `smtp_from`); must exist **before** kps (operator mounts it); **auto-created by the kps target** |
 | 3 | kube-prometheus-stack | `prometheus-community/kube-prometheus-stack` | `92.17.0` | installs the **Prometheus Operator CRDs** everything else may reference; Grafana + Prometheus TSDB; **Alertmanager SES transport** |
 | 4 | Loki | `grafana/loki` | `7.5.0` | logs backend (must exist before the collector forwards logs) |
 | 5 | Jaeger | `jaegertracing/jaeger` | `4.13.1` | traces backend (**pinned — read the note**) |
@@ -161,26 +161,28 @@ kubectl --context obs-v1-observability create namespace monitoring \
 
 ## Step 3 — prerequisite: SES secret (auto-run)
 
-Alertmanager delivers alert e-mail via Amazon SES, reading the SMTP **password** from a mounted
-secret that must exist **before** kps — the Prometheus Operator mounts it into the Alertmanager pod as
-a volume, so a missing secret stops the pod from starting.
+Alertmanager delivers alert e-mail via Amazon SES, and **all three SES settings live in one Secret** —
+`alertmanager-ses-smtp`, with keys `smtp_auth_username`, `smtp_password`, `smtp_from`. It must exist
+**before** kps: the Prometheus Operator mounts it into the Alertmanager pod as a volume (the password
+is read from that file), so a missing secret stops the pod from starting.
 
 **You normally don't run this by hand.** Step 3's `kube-prometheus-stack` target depends on it, so
-`make kube-prometheus-stack SES_SMTP_PASSWORD=…` (and `make all …`) create it for you. Run it
-standalone only to **rotate the password** without a full kps reinstall, or to **repair the
-placeholder** after a kps run that omitted `SES_SMTP_PASSWORD`:
+`make kube-prometheus-stack SES_SMTP_USERNAME=… SES_SMTP_PASSWORD=… SES_FROM=…` (and `make all …`)
+create it for you. Run it standalone only to **set or rotate** the SES values without a full kps
+reinstall:
 
 ```bash
-make alertmanager-secret SES_SMTP_PASSWORD='<ses-smtp-password>'
+make alertmanager-secret \
+  SES_SMTP_USERNAME='<ses-user>' SES_SMTP_PASSWORD='<ses-pass>' SES_FROM='alerts@your-domain'
 ```
 
-Expands to a `kubectl create secret generic alertmanager-ses-smtp … --from-literal=smtp_password=…`.
-If you omit `SES_SMTP_PASSWORD`, a placeholder is stored so the stack still boots (e-mail just won't
-authenticate until you re-run with the real value). The SES **username** and **From** are set in
-Step 3 via `SES_SMTP_USERNAME=` / `SES_FROM=` (injected with `--set-string`, so they stay out of git).
-Full SES setup (verified identity, sandbox) is in **[ALERTING-CRD.md](ALERTING-CRD.md)**.
+**Pass any subset** — a value you don't pass **keeps its current value** in the Secret, so re-running
+this (or kps) never wipes what you set before. A key that was never set falls back to a placeholder
+(username/password → e-mail won't authenticate) or the default From address.
 
-**Verify:** `kubectl --context obs-v1-observability -n monitoring get secret alertmanager-ses-smtp`
+**Verify:** `kubectl --context obs-v1-observability -n monitoring get secret alertmanager-ses-smtp -o jsonpath='{.data}'`
+— three keys (`smtp_auth_username`, `smtp_password`, `smtp_from`). Full SES setup (verified identity,
+sandbox) is in **[ALERTING-CRD.md](ALERTING-CRD.md)**.
 
 ---
 
@@ -194,28 +196,29 @@ transport** (the central "how e-mail is sent"; per-service routing is added in S
 make kube-prometheus-stack
 ```
 
-**To enable Alertmanager e-mail**, pass the SES settings on the same command. The **password** lives
-in the `alertmanager-ses-smtp` secret (the Step 3 prerequisite above); the **username** and **From** are injected here via
-`--set-string`, so they stay out of git:
+**To enable Alertmanager e-mail**, set the SES values — all three go into the one `alertmanager-ses-smtp`
+Secret (the Step 3 prerequisite above). You can pass them straight to this target (they flow to the
+`alertmanager-secret` dependency); kps then reads **username** and **From** back out of the Secret and
+injects them with `--set-string`, while the **password** stays in the mounted file (never in helm):
 
 ```bash
 make kube-prometheus-stack \
   SES_SMTP_USERNAME='<ses-user>' SES_SMTP_PASSWORD='<ses-pass>' SES_FROM='alerts@your-domain'
 ```
 
-| Variable | Where it goes | If unset |
+| Variable | Stored in the Secret as | How it reaches Alertmanager |
 |---|---|---|
-| `SES_SMTP_PASSWORD` | Secret `alertmanager-ses-smtp` (key `smtp_password`), mounted into Alertmanager | placeholder stored → e-mail won't authenticate |
-| `SES_SMTP_USERNAME` | `--set-string alertmanager.config.global.smtp_auth_username` | `values.yaml` placeholder kept → won't authenticate |
-| `SES_FROM` | `--set-string alertmanager.config.global.smtp_from` | `values.yaml` default From address kept |
+| `SES_SMTP_PASSWORD` | `smtp_password` | mounted file → `smtp_auth_password_file` (never passed to helm) |
+| `SES_SMTP_USERNAME` | `smtp_auth_username` | kps reads it from the Secret → `--set-string …smtp_auth_username` |
+| `SES_FROM` | `smtp_from` | kps reads it from the Secret → `--set-string …smtp_from` |
 
-> ⚠ **Re-run caveat:** this target depends on `alertmanager-secret`, so it rewrites the SES secret on
-> every run. If you re-run it **without** `SES_SMTP_PASSWORD`, the stored password is overwritten with
-> the placeholder and delivery stops. Always pass `SES_SMTP_PASSWORD` when re-running kps (or re-run
-> `make alertmanager-secret SES_SMTP_PASSWORD=…` afterwards). Full SES setup (verified identity,
-> sandbox) is in **[ALERTING-CRD.md](ALERTING-CRD.md)**.
+> ℹ You don't have to pass the SES vars every time. Set them once (here or via `make alertmanager-secret`);
+> later `make kube-prometheus-stack` / `make all` with no SES vars **reuse** the values already in the
+> Secret — they are preserved, not overwritten. Full SES setup (verified identity, sandbox) is in
+> **[ALERTING-CRD.md](ALERTING-CRD.md)**.
 
-Expands to (with the SES vars set, `$(SES_SET)` adds the two `--set-string` overrides):
+Expands to (username/From are read from the Secret and added as `--set-string` overrides; the password
+is never passed to helm):
 
 ```bash
 helm --kube-context obs-v1-observability upgrade --install kps \

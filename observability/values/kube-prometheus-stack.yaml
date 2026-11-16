@@ -77,9 +77,10 @@ alertmanager:
     alertmanagerConfigMatcherStrategy:
       type: None
   # Base config: global SES transport + a null catch-all. Per-app AlertmanagerConfigs graft their
-  # routes/receivers under this root. Override the SES username at deploy with
-  #   make kube-prometheus-stack SES_SMTP_USERNAME=AKIA… SES_FROM=alerts@you.com
-  # (the Makefile passes it via --set-string so it stays out of git).
+  # routes/receivers under this root. The SES username + From + password all live in the one
+  # alertmanager-ses-smtp Secret (`make alertmanager-secret SES_SMTP_USERNAME=… SES_SMTP_PASSWORD=…
+  # SES_FROM=…`); the kps target reads username/From back out of that Secret and --set-strings the two
+  # placeholders below, so they stay out of git. The password is read from the mounted file (no helm).
   config:
     global:
       resolve_timeout: 5m
@@ -88,7 +89,8 @@ alertmanager:
       smtp_hello: "lab.example.com"
       # From address must be a VERIFIED SES identity (domain or e-mail), else SES rejects the send.
       smtp_from: "observability-alerts@lab.example.com"
-      # SES SMTP username (an IAM-derived credential, NOT your AWS access key). Overridden at deploy.
+      # SES SMTP username (an IAM-derived credential, NOT your AWS access key). This placeholder is
+      # replaced at deploy by the kps target from the alertmanager-ses-smtp Secret's smtp_auth_username.
       smtp_auth_username: "REPLACE_WITH_SES_SMTP_USERNAME"
       smtp_auth_password_file: "/etc/alertmanager/secrets/alertmanager-ses-smtp/smtp_password"
       smtp_require_tls: true

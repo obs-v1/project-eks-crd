@@ -19,15 +19,15 @@ COLLECTOR_HOST ?= otel-collector.obs.internal
 DOMAIN         ?=
 REGION         ?= us-east-1
 
-# SES e-mail creds for Alertmanager. Password goes into a Secret (never on the CLI history of
-# a committed file); username/from are injected into the kps config via --set-string at deploy,
-# so they stay out of git. All optional — the stack still comes up without them (e-mail just
-# won't authenticate until you set them).
+# SES e-mail settings for Alertmanager — all three live in ONE Secret (alertmanager-ses-smtp),
+# created/updated by the `alertmanager-secret` target. The password is mounted into Alertmanager as a
+# file (smtp_auth_password_file); username/From have no file support in Alertmanager, so the
+# `kube-prometheus-stack` target reads them back out of that same Secret and injects them with
+# --set-string at deploy. Pass any subset; a key you don't pass keeps its current value in the Secret,
+# so a re-run never wipes it. All optional — the stack boots without them (e-mail just won't auth).
 SES_SMTP_USERNAME ?=
 SES_SMTP_PASSWORD ?=
 SES_FROM          ?=
-SES_SET = $(if $(SES_SMTP_USERNAME),--set-string alertmanager.config.global.smtp_auth_username=$(SES_SMTP_USERNAME),) \
-          $(if $(SES_FROM),--set-string alertmanager.config.global.smtp_from=$(SES_FROM),)
 
 H  = helm --kube-context $(CONTEXT) upgrade --install
 K  = kubectl --context $(CONTEXT)
@@ -79,22 +79,37 @@ namespace: ensure-context
 all: repos namespace alertmanager-secret kube-prometheus-stack loki jaeger pyroscope otel-collector pyrra collector-lb ingress dashboards app-monitoring obs-agent agent
 	@echo ""; echo "  ✓ observability stack deployed to $(CONTEXT) + OTel collectors to $(CONTEXT) & $(AGENT_CTX)."
 
-# kps depends on alertmanager-secret so the SES password Secret exists before the Alertmanager
-# pod tries to mount it (the operator wires it as a volume). SES_SET injects username/from.
+# kps depends on alertmanager-secret so the one SES Secret exists before the Alertmanager pod mounts
+# it (the operator wires it as a volume). Password is read from the mounted file; username/From can't
+# be file-sourced in Alertmanager, so we read them back out of the Secret and --set-string them.
 kube-prometheus-stack: namespace alertmanager-secret
-	$(H) kps prometheus-community/kube-prometheus-stack --version 92.17.0 $(HN) \
-	  -f values/kube-prometheus-stack.yaml $(SES_SET) --wait --timeout 15m
+	@U="$$($(K) get secret alertmanager-ses-smtp $(HN) -o jsonpath='{.data.smtp_auth_username}' 2>/dev/null | base64 -d)"; \
+	 F="$$($(K) get secret alertmanager-ses-smtp $(HN) -o jsonpath='{.data.smtp_from}' 2>/dev/null | base64 -d)"; \
+	 SET=""; \
+	 case "$$U" in ''|PLACEHOLDER_*) ;; *) SET="$$SET --set-string alertmanager.config.global.smtp_auth_username=$$U";; esac; \
+	 [ -n "$$F" ] && SET="$$SET --set-string alertmanager.config.global.smtp_from=$$F"; \
+	 $(H) kps prometheus-community/kube-prometheus-stack --version 92.17.0 $(HN) \
+	   -f values/kube-prometheus-stack.yaml $$SET --wait --timeout 15m
 
-# SES SMTP password → Secret alertmanager-ses-smtp (key smtp_password), mounted into Alertmanager
-# and referenced by smtp_auth_password_file. Without SES_SMTP_PASSWORD a placeholder is stored so
-# the stack still boots; re-run with the real value to enable delivery.
+# ALL SES settings → one Secret alertmanager-ses-smtp (keys smtp_auth_username / smtp_password /
+# smtp_from). Password is mounted as smtp_auth_password_file; username/From are read back by the kps
+# target (Alertmanager has no file source for them) and --set-string'd. Pass any subset — a key you
+# don't pass keeps its current value in the Secret, so re-running this (or kps) never wipes what you
+# set before. Unset-and-never-set keys fall back to a placeholder (username/password) or the default
+# From address.
 alertmanager-secret: namespace
-	@PW='$(SES_SMTP_PASSWORD)'; \
-	 if [ -z "$$PW" ]; then PW='PLACEHOLDER_SET_SES_SMTP_PASSWORD'; \
-	   echo "  ⚠ SES_SMTP_PASSWORD not set — storing a placeholder; e-mail auth will fail until you re-run with it."; fi; \
-	 $(K) create secret generic alertmanager-ses-smtp $(HN) --from-literal=smtp_password="$$PW" \
-	   --dry-run=client -o yaml | $(K) apply -f - >/dev/null
-	@echo "  ✓ secret alertmanager-ses-smtp present (mounted into Alertmanager)."
+	@cur() { $(K) get secret alertmanager-ses-smtp $(HN) -o jsonpath="{.data.$$1}" 2>/dev/null | base64 -d 2>/dev/null; }; \
+	 U='$(SES_SMTP_USERNAME)'; [ -n "$$U" ] || U="$$(cur smtp_auth_username)"; [ -n "$$U" ] || U='PLACEHOLDER_SET_SES_SMTP_USERNAME'; \
+	 P='$(SES_SMTP_PASSWORD)'; [ -n "$$P" ] || P="$$(cur smtp_password)";      [ -n "$$P" ] || P='PLACEHOLDER_SET_SES_SMTP_PASSWORD'; \
+	 F='$(SES_FROM)';          [ -n "$$F" ] || F="$$(cur smtp_from)";          [ -n "$$F" ] || F='observability-alerts@lab.example.com'; \
+	 $(K) create secret generic alertmanager-ses-smtp $(HN) \
+	   --from-literal=smtp_auth_username="$$U" \
+	   --from-literal=smtp_password="$$P" \
+	   --from-literal=smtp_from="$$F" \
+	   --dry-run=client -o yaml | $(K) apply -f - >/dev/null; \
+	 case "$$U" in PLACEHOLDER_*) echo "  ⚠ SES_SMTP_USERNAME unset — stored placeholder (e-mail won't authenticate).";; esac; \
+	 case "$$P" in PLACEHOLDER_*) echo "  ⚠ SES_SMTP_PASSWORD unset — stored placeholder (e-mail won't authenticate).";; esac; \
+	 echo "  ✓ secret alertmanager-ses-smtp present (smtp_auth_username + smtp_password + smtp_from)."
 
 # CRD alerting — each service owns BOTH halves in its own chart:
 #   • RULES (what to alert on)   — app/<svc>/templates/prometheusrule.yaml     → <svc>-alerts

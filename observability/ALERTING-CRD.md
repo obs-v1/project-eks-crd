@@ -127,20 +127,23 @@ In the SES console (region `us-east-1`):
   If your SES account is still in the **sandbox**, also verify each **recipient** address, or request
   production access.
 
-### 2. Point the config at your region / sender
+### 2. Point the config at your region
 In `values/kube-prometheus-stack.yaml` the global block is pre-set to
-`email-smtp.us-east-1.amazonaws.com:587` with STARTTLS. Change the region host and `smtp_from` if
-needed (or pass `SES_FROM=` at deploy).
+`email-smtp.us-east-1.amazonaws.com:587` with STARTTLS. Change the region host if needed. The
+`smtp_from` and `smtp_auth_username` placeholders there are overridden at deploy from the Secret (below).
 
 ### 3. Store the credentials (never in git)
+All three SES settings live in **one** Secret, `alertmanager-ses-smtp` (keys `smtp_auth_username`,
+`smtp_password`, `smtp_from`):
 ```bash
-make alertmanager-secret SES_SMTP_PASSWORD='<ses-smtp-password>'     # → Secret alertmanager-ses-smtp
+make alertmanager-secret \
+  SES_SMTP_USERNAME='AKIA…SES' SES_SMTP_PASSWORD='<ses-smtp-password>' SES_FROM='observability-alerts@lab.example.com'
 ```
-The password is mounted into Alertmanager and referenced as `smtp_auth_password_file`. The **username**
-and **From** are injected at deploy via `--set-string`:
-```bash
-make kube-prometheus-stack SES_SMTP_USERNAME='AKIA…SES' SES_FROM='observability-alerts@lab.example.com'
-```
+The **password** is mounted into Alertmanager and referenced as `smtp_auth_password_file`; Alertmanager
+has no file source for the **username**/**From**, so the `kube-prometheus-stack` target reads those two
+back out of the Secret and injects them via `--set-string`. Pass any subset — values you omit keep
+their current value in the Secret (a re-run never wipes them). You can also pass the same vars straight
+to `make kube-prometheus-stack` / `make all`; they flow to the `alertmanager-secret` dependency.
 (For GitOps, `alertmanager/ses-smtp-secret.example.yaml` is the manifest form — feed it through
 sealed-secrets/SOPS, don't commit a real password.)
 
