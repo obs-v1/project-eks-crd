@@ -63,4 +63,15 @@ spec:
           annotations:
             summary: "{{ $svc }} container restarting repeatedly"
             description: "a {{ $svc }} container restarted more than 3 times in 15m."
+
+        - alert: {{ $svc }}DeploymentDown
+          expr: >-
+            k8s_deployment_desired{k8s_deployment_name="upi-service"} < 1
+          for: 5m
+          labels: { severity: "critical", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
+          annotations:
+            summary: "{{ $svc }} has pod(s) not in Running state"
+            description: "{{ "{{ $value }}" }} {{ $svc }} pod(s) are Pending/Failed/Unknown."
+
 {{- end }}
+
