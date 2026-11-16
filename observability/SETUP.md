@@ -7,8 +7,8 @@ is and verify it before moving on.
 
 > **This is the CRD-alerting variant** (`project-eks-crd`). Metric collection is identical to the
 > base `project-eks` (OTel-only), but alerting is defined declaratively with Prometheus Operator CRDs
-> and delivered by Amazon SES e-mail. Two extra steps appear below — the **SES secret** (Step 3b) and
-> the **alerting** step (Step 14: per-service rules + per-service routing). The full alerting design, SES setup and verification live
+> and delivered by Amazon SES e-mail. Two extra concerns appear below — the **SES secret** (a Step 3
+> prerequisite, auto-created by kps) and the **alerting** step (Step 14: per-service rules + per-service routing). The full alerting design, SES setup and verification live
 > in **[ALERTING-CRD.md](ALERTING-CRD.md)**; this guide just slots them into the deploy order.
 
 > The cluster itself (two EKS clusters, VPC peering, private zone, Traefik, external-dns, EBS CSI)
@@ -60,7 +60,7 @@ scrapers are **disabled** — see `values/kube-prometheus-stack.yaml`.
 | 0 | Prerequisites | *(cluster, already up)* | — | kubectl contexts + Traefik + external-dns must exist |
 | 1 | Helm repos | — | — | register the chart sources |
 | 2 | Namespace | `monitoring` | — | everything lives here |
-| 3b | SES secret | `alertmanager-ses-smtp` | — | SES SMTP password for Alertmanager — must exist **before** kps (mounted into the Alertmanager pod) |
+| 3 ⟶ | *prereq:* SES secret | `alertmanager-ses-smtp` | — | SES SMTP password for Alertmanager — must exist **before** kps (operator mounts it); **auto-created by the kps target** |
 | 3 | kube-prometheus-stack | `prometheus-community/kube-prometheus-stack` | `92.17.0` | installs the **Prometheus Operator CRDs** everything else may reference; Grafana + Prometheus TSDB; **Alertmanager SES transport** |
 | 4 | Loki | `grafana/loki` | `7.5.0` | logs backend (must exist before the collector forwards logs) |
 | 5 | Jaeger | `jaegertracing/jaeger` | `4.13.1` | traces backend (**pinned — read the note**) |
@@ -75,7 +75,7 @@ scrapers are **disabled** — see `values/kube-prometheus-stack.yaml`.
 | 14 | App alerting (CRDs) | `app/<svc>/` (+ optional `app-monitoring/`) | — | per-service `PrometheusRule` (what to alert on) + per-service `AlertmanagerConfig` (who is paged) |
 
 > **Shortcut:** `make all DOMAIN=lab.example.com SES_SMTP_USERNAME=… SES_SMTP_PASSWORD=… SES_FROM=…`
-> runs every step (3b and 14 included) in exactly this order. The steps below are the same thing, one
+> runs every step (the SES secret and Step 14 included) in exactly this order. The steps below are the same thing, one
 > at a time. See **[ALERTING-CRD.md](ALERTING-CRD.md)** for the alerting design and SES details.
 
 ---
@@ -159,10 +159,16 @@ kubectl --context obs-v1-observability create namespace monitoring \
 
 ---
 
-## Step 3b — SES secret (before kps)
+## Step 3 — prerequisite: SES secret (auto-run)
 
 Alertmanager delivers alert e-mail via Amazon SES, reading the SMTP **password** from a mounted
-secret. It must exist **before** kps, because the operator mounts it into the Alertmanager pod.
+secret that must exist **before** kps — the Prometheus Operator mounts it into the Alertmanager pod as
+a volume, so a missing secret stops the pod from starting.
+
+**You normally don't run this by hand.** Step 3's `kube-prometheus-stack` target depends on it, so
+`make kube-prometheus-stack SES_SMTP_PASSWORD=…` (and `make all …`) create it for you. Run it
+standalone only to **rotate the password** without a full kps reinstall, or to **repair the
+placeholder** after a kps run that omitted `SES_SMTP_PASSWORD`:
 
 ```bash
 make alertmanager-secret SES_SMTP_PASSWORD='<ses-smtp-password>'
@@ -170,7 +176,7 @@ make alertmanager-secret SES_SMTP_PASSWORD='<ses-smtp-password>'
 
 Expands to a `kubectl create secret generic alertmanager-ses-smtp … --from-literal=smtp_password=…`.
 If you omit `SES_SMTP_PASSWORD`, a placeholder is stored so the stack still boots (e-mail just won't
-authenticate until you re-run with the real value). The SES **username** and **From** are passed to
+authenticate until you re-run with the real value). The SES **username** and **From** are set in
 Step 3 via `SES_SMTP_USERNAME=` / `SES_FROM=` (injected with `--set-string`, so they stay out of git).
 Full SES setup (verified identity, sandbox) is in **[ALERTING-CRD.md](ALERTING-CRD.md)**.
 
@@ -189,7 +195,7 @@ make kube-prometheus-stack
 ```
 
 **To enable Alertmanager e-mail**, pass the SES settings on the same command. The **password** lives
-in the `alertmanager-ses-smtp` secret (Step 3b); the **username** and **From** are injected here via
+in the `alertmanager-ses-smtp` secret (the Step 3 prerequisite above); the **username** and **From** are injected here via
 `--set-string`, so they stay out of git:
 
 ```bash
