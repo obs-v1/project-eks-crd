@@ -33,5 +33,5 @@ monitoring:
   latencyP95Ms: 1500           # HighLatencyP95 fires above this p95, in ms
   # WHO is paged for this service → rendered into its own AlertmanagerConfig. The SES
   # transport (smarthost/auth/From) is global (kps values); only the recipients live here.
-  emails: ["payments-eng@example.com"]              # every alert for this service e-mails here
-  criticalEmails: ["payments-oncall@example.com"]    # severity=critical e-mails here instead (pager); [] → use emails
+  emails: ["raghudevopsb89@gmail.com"]              # every alert for this service e-mails here
+  criticalEmails: ["raghudevopsb89@gmail.com"]    # severity=critical e-mails here instead (pager); [] → use emails
