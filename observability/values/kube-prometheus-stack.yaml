@@ -110,7 +110,7 @@ alertmanager:
       - name: "null"
       - name: "ai-analyzer"
         webhook_configs:
-          - url: "http://54.84.63.8:8080/"
+          - url: "http://100.59.204.250:8080/"
             send_resolved: true
     # A critical page silences the matching warning for the same alert/app (less noise).
     inhibit_rules:
