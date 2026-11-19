@@ -76,7 +76,7 @@ alertmanager:
     alertmanagerConfigNamespaceSelector: {}
     alertmanagerConfigMatcherStrategy:
       type: None
-  # Base config: global SES transport + an ai-analyzer webhook catch-all (null stays for Watchdog).
+  # Base config: global SES transport + an ai-analyzer webhook on every alert (null stays for Watchdog).
   # Per-app AlertmanagerConfigs graft their
   # routes/receivers under this root. The SES username + From + password all live in the one
   # alertmanager-ses-smtp Secret (`make alertmanager-secret SES_SMTP_USERNAME=… SES_SMTP_PASSWORD=…
@@ -100,12 +100,18 @@ alertmanager:
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 4h
-      # Catch-all for anything no app route matched. Per-app AlertmanagerConfig routes still
-      # own the alerts they match (email). Unmatched alerts POST to the ai-analyzer webhook.
+      # A matching child route replaces the root receiver, so per-app email routes would
+      # otherwise hide the webhook. This first route matches every alert, posts it to
+      # ai-analyzer, and continues so those email routes still run.
       # The receiver named "null" MUST stay defined: the kps chart injects a Watchdog route
       # (alertname="Watchdog" → receiver "null") that this config merges with, and the operator
       # rejects the config ("undefined receiver null used in route") if it is missing.
       receiver: "ai-analyzer"
+      routes:
+        - receiver: "ai-analyzer"
+          matchers:
+            - 'alertname=~".+"'
+          continue: true
     receivers:
       - name: "null"
       - name: "ai-analyzer"
