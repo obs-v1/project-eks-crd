@@ -30,7 +30,7 @@ spec:
         - alert: {{ $svc }}HighLatencyP95
           expr: >-
             histogram_quantile(0.95, sum by (le) (rate(duration_milliseconds_bucket{service_namespace="{{ $m.serviceNamespace }}",service_name="{{ $svc }}"}[5m]))) > {{ $m.latencyP95Ms }}
-          for: 10m
+          for: 1m
           labels: { severity: "warning", team: {{ $m.team | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
           annotations:
             summary: "{{ $svc }} p95 latency over {{ $m.latencyP95Ms }}ms"
@@ -40,7 +40,7 @@ spec:
           expr: >-
             (k8s_deployment_desired{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}
               - k8s_deployment_available{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_deployment_name="{{ $svc }}"}) > 0
-          for: 10m
+          for: 1m
           labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
           annotations:
             summary: "{{ $svc }} is short of its desired replicas"
@@ -58,7 +58,7 @@ spec:
         - alert: {{ $svc }}ContainerRestarting
           expr: >-
             increase(k8s_container_restarts{k8s_cluster_name="{{ $m.cluster }}",k8s_namespace_name="{{ $m.serviceNamespace }}",k8s_pod_name=~"{{ $svc }}-.*"}[15m]) > 3
-          for: 10m
+          for: 1m
           labels: { severity: "warning", team: {{ $m.infraTeam | quote }}, app: {{ $m.app | quote }}, service: {{ $svc | quote }} }
           annotations:
             summary: "{{ $svc }} container restarting repeatedly"
